@@ -48,3 +48,6 @@ Thumbs.db
 
 # Git
 *.orig
+
+# Paper writing templates
+IEEE-conference-template-062824/
