@@ -1,0 +1,327 @@
+--- PAGE 1 ---
+IEEE INTERNET OF THINGS JOURNAL, VOL. 12, NO. 10, 15 MAY 2025 13525
+Low-Bitrate High-Quality Digital Semantic
+Communication Based on RVQGAN
+Xiaojiao Chen ,J i n gW a n g, Senior Member, IEEE, Jingxuan Huang , Ming Zeng ,
+Zhong Zheng , Member, IEEE, and Zesong Fei , Senior Member, IEEE
+Abstract—Digital semantic communication has attracted con-
+siderable attention attributed to its potential for integration with
+modern digital communication systems, which has demonstrated
+signiﬁcant performance gains. However, despite its ability to
+save transmission bandwidth, digital semantic communication
+can degrade the performance of tasks at the receiver, particularly
+in low-bitrate scenarios. In this article, we propose a novel
+low-bitrate digital semantic communication method based on
+a generative model for speech transmission to achieve high-
+quality reconstructed speech at low-bitrate transmission. In
+particular, we ﬁrst investigate a multiscale semantic codec based
+on residual vector quantization with a generative adversary
+network (RVQGAN) model for extracting semantic information
+and obtaining high speech reconstruction quality while trans-
+mitting at a low bitrate. We then, design a channel noise
+suppression (CNS) module based on U-Net to alleviate the
+channel effect at low signal-to-noise ratio (SNR) by restoring
+high-quality semantic features, which is capable of improving the
+performance of the proposed method under challenging channel
+conditions. Moreover, a Transformer-based code predictor is
+utilized to further improve the robustness of the proposed method
+by accounting for both the channel impact and reconstruction
+quality. Finally, a three-stage training strategy is also presented
+in this article to ensure the effective operation of the proposed
+multiscale semantic codec, CNS module, and code predictor
+module. Experimental results demonstrate that the proposed
+method operating at 3 kb/s can save at least 50% of bandwidth
+while achieving higher speech restoration quality than the
+baseline method.
+Index Terms —Digital semantic communication, generative
+model, low bitrate, speech transmission.
+I. I NTRODUCTION
+W
+ITH the rapid advancement of information technology,
+numerous novel Internet of Things (IoT) devices have
+emerged, including virtual reality, Internet of Vehicles (IoV),
+smart manufacturing, and telemedicine. The communication
+requirements of these IoT applications place strict demands
+on communication methods, including considerable data trans-
+mission, exceptional reliability, and low latency. However,
+Received 30 October 2024; revised 30 December 2024; accepted 12
+January 2025. Date of publication 13 February 2025; date of current version
+9 May 2025. This work was supported in part by the National Key Research
+and Development Program of China under Grant 2022YFB2902003, and
+in part by the National Natural Science Foundation of China under Grant
+62201044. (Corresponding author: Jingxuan Huang.)
+The authors are with the School of Information and Electronics, Beijing
+Institute of Technology, Beijing 100081, China (e-mail: xiaojiaochen76@
+gmail.com; wangjing@bit.edu.cn; jxhbit@gmail.com; mzengzm@163.com;
+zhong.zheng@bit.edu.cn; feizesong@bit.edu.cn).
+Digital Object Identiﬁer 10.1109/JIOT.2025.3534462
+existing communication systems face signiﬁcant challenges
+due to limited bandwidth and spectrum resources [1].I n
+addition, most IoT devices typically have low bandwidth,
+which imposes requirements for low-bitrate transmission on
+communication systems [2]. As an emerging communication
+method, semantic communication technology, which conveys
+semantic information rather than data or signals, is expected
+to effectively address these challenges in the future.
+Researchers are increasingly exploring the potential of
+semantic communication systems [3], [4], [5], [6]. This trend
+is due to the signiﬁcant difference between semantic commu-
+nication and traditional communication: it focuses not only
+on the reliable transmission of data but also on the accuracy
+of downstream tasks at the receiver. By accurately transmit-
+ting from symbol to meaning, semantic communication can
+transmit only semantically relevant information, signiﬁcantly
+increasing communication efﬁciency.
+Deep learning technology has evolved into the founda-
+tion of semantic communication as artiﬁcial intelligence
+has advanced. Researchers have investigated various modal-
+ities in semantic communication systems, such as the
+transmission of images [3], [7], [8],t e x t [4], [9], [10], and
+speech [5], [10], [11], in both single-modal and multimodal
+settings. Compared to images and text, speech is one of
+the most fundamental forms of human communication, capa-
+ble of accurately conveying the content and emotions that
+both parties wish to express, making it indispensable. Thus,
+researching how to transmit speech signals efﬁciently is critical
+to the advancement of semantic communication.
+Several studies [5], [11], [12], [13] have been conducted
+on semantic speech transmission, with the primary goal of
+ensuring high-quality recovered speech signals at the receiver.
+Weng and Qin [5] ﬁrst proposed a deep-learning-based seman-
+tic communication system known as DeepSC-S. This system
+employs an attention module to extract relevant semantic
+information and optimizes the model through joint semantic-
+channel coding, facilitating the restoration of the speech signal
+at the receiver. Wei et al. [13] developed a streaming semantic
+communication system aimed at real-time speech transmission.
+This system utilizes Transformer-XL for semantic information
+extraction and incorporates a chunk-based masked attention
+mechanism to enhance transmission quality while minimizing
+latency. In [12], a multiuser speech semantic communication
+system leveraging federated learning is proposed, which sig-
+niﬁcantly enhances both the accuracy and efﬁciency of speech
+transmission. Deep speech semantic transmission (DSST) [11]
+2327-4662 c⃝ 2025 IEEE. All rights reserved, including rights for text and data mining, and training of artiﬁcial intelligence
+and similar technologies. Personal use is permitted, but republication/redistribution requires IEEE permission.
+See https://www.ieee.org/publications/rights/index.html for more information.Authorized licensed use limited to: Beijing Jiaotong University. Downloaded on January 25,2026 at 06:52:47 UTC from IEEE Xplore.  Restrictions apply. 
+--- PAGE 2 ---
+13526 IEEE INTERNET OF THINGS JOURNAL, VOL. 12, NO. 10, 15 MAY 2025
+is introduced for end-to-end speech transmission over wireless
+channels. DSST features a nonlinear transformation that maps
+speech sources to a semantic latent space, subsequently feed-
+ing these semantic features into the source channel encoder to
+produce channel input sequences. In [14], a Transformer-based
+semantic communication system for speech is introduced.
+Although these methods have improved bandwidth saving and
+recovery performance, they still have limitations as they do
+not transmit digital bits. These methods are challenging to
+integrate with modern digital communication systems, and
+existing mature and efﬁcient digital communication technolo-
+gies cannot be fully utilized.
+Vector quantization (VQ) based on semantic communi-
+cation systems [15], [16], [17], [18], [19] is proposed to
+improve compatibility with digital communication systems.
+Zhou et al. [15] proposed a multilevel codebook-assisted
+digital generative semantic communication to address the
+incompatibility between conventional VQ and digital constel-
+lation modulation, as well as the mismatch between code
+indices and code vectors. Fu et al. [16] designed a VQ-based
+semantic communication system for image transmission called
+VQ-DeepSC, which extracts semantic features from UNet
+structures and compresses them into bitstreams before trans-
+mission. Zhang et al. [17] proposed a uniﬁed codebook by
+employing a VQ-based mechanism to support digital com-
+munication and reduce transmission overhead. Xie et al. [18]
+proposed a task-oriented communication scheme with digital
+modulation, and the concept of a robust information bottleneck
+was introduced to enable robust model training across various
+signal-to-noise ratio (SNR) levels. VQ-DeepVSC, as presented
+in [19], introduces an adaptive keyframe extraction and inter-
+polation (AKEI) module to minimize temporal redundancy,
+along with a multichannel spatially conditioned VQ (MSVQ)
+for the ﬁnal compression of keyframes in a video. The afore-
+mentioned studies have shown that the VQ mechanism can be
+effective in digital semantic communication systems. However,
+given the constraints of limited bandwidth resources in IoT,
+more in-depth research is required to advance digital semantic
+communication systems in low-bandwidth environments.
+Recently, IoT communication technology has also attracted
+the attention of researchers [20], [21], [22], [23], [24].T h e
+integration of generative artiﬁcial intelligence (GAI) mod-
+els with various IoT devices has demonstrated enormous
+potential, allowing for more efﬁcient and intelligent IoT
+applications. At the same time, generative-based semantic
+communication systems have attracted signiﬁcant research
+attention [20], [21], [22].I n [20], a joint source–channel cod-
+ing scheme using StyleGAN was proposed for semantic image
+transmission. In [21], a joint coding-modulation framework
+based on V AE was introduced for digital semantic commu-
+nication. Similarly, Grassucci et al. [22] presented an audio
+semantic communication framework using a latent diffusion
+model conditioned on textual semantics. These studies demon-
+strate the ability of generative models to produce high-quality
+recovery signals in semantic communication.
+Building on the aforementioned observations, this article
+proposes a digital semantic communication method based
+on a generative model, which is designed to achieve high
+reconstruction quality at a low bitrate. The bandwidth bur-
+den could be signiﬁcantly reduced owing to the low-bitrate
+transmission, and the proposed method can be applied to
+digital communication with a high reconstruction quality.
+Speciﬁcally, we present a three-stage training strategy. In
+the ﬁrst stage, a multiscale codec is pretrained to precisely
+extract semantic information with low bitrate and obtain high
+reconstructed speech quality. In the second stage, the channel
+noise suppression (CNS) module is trained to mitigate the
+impact of the channel on system performance in a low SNR
+channel condition. In the third stage, a Transformer-based code
+predictor module is ﬁnetuned with the semantic decoder to
+improve the performance of the proposed method.
+The main contributions of this article are summarized as
+follows.
+1) This article proposes a digital semantic communication
+system based on RVQGAN, which aims at recovering
+high-quality speech at the receiver while transmitting
+at a low rate. This method takes into account the
+compatibility with digital communication systems as
+well as the bandwidth burden.
+2) We propose a multiscale semantic codec based on
+RVQGAN to precisely extract semantic information
+with low bitrate and produce high-quality speech at the
+receiver, which can effectively save the transmission
+bandwidth and integrate with digital communications by
+bitstream.
+3) To mitigate the impact of the channel on system
+performance, we design a CNS module that removes
+channel interference from the semantic features at the
+receiver as much as possible, consequently improving
+system performance under low SNR and alleviating
+the cliff effect. We introduce a Transformer-based code
+predictor at the receiver to further improve reconstructed
+quality.
+4) To verify the effectiveness of the proposed approach,
+extensive experiments are conducted in the speech
+reconstruction task. The experimental results show
+that the proposed approach outperforms the baseline
+methods in both transmission rate and reconstruction
+performance.
+The remainder of this article is organized as follows. In
+Section II, we introduced the proposed semantic communi-
+cation system model. Section III elaborates on the proposed
+multiscale semantic codec to achieve the low bitrate. In
+Section IV, we introduce the proposed low-bitrate digital
+semantic communication method in detail. Experimental setup
+and results are presented, respectively, in Sections V and VI.
+Section VII is the conclusion of this article.
+II. S
+YSTEM MODEL
+In this section, we present a digital semantic commu-
+nication framework. As shown in Fig. 1,t h i sf r a m e w o r k
+mainly includes an encoder, a digital modulation scheme, a
+wireless channel, and a decoder. Speciﬁcally, in order to adapt
+the digital communication scheme, the encoder ﬁrst extracts
+semantic information from the source signal and quantizes it
+Authorized licensed use limited to: Beijing Jiaotong University. Downloaded on January 25,2026 at 06:52:47 UTC from IEEE Xplore.  Restrictions apply. 
+--- PAGE 3 ---
+CHEN et al.: LOW-BITRATE HIGH-QUALITY DIGITAL SEMANTIC COMMUNICATION BASED ON RVQGAN 13527
+Fig. 1. System model of the proposed digital semantic communication.
+to obtain a bitstream. Then, the bitstream is modulated by a
+digital modulation scheme and sent to the receiver through
+the wireless channel. Finally, the received data is demodulated
+to obtain the semantic feature and then semantic features are
+decoded to reconstruct the sent source information through the
+decoder.
+A. Encoder
+Given the input data S ∈ R
+1×T , where T is the length of
+input data, the encoder ﬁrst utilizes a semantic encoder to
+extract semantic features from S and a quantizer is adopted to
+transform semantic features into bits stream Z
+q which can be
+expressed by
+Zq = fe(S) = Q(ge(S)) (1)
+where fe(·) include the semantic encoder ge(·) and quantizer
+Q(·) with learnable parameters. The output of the semantic
+encoder Z = ge(S), which is a series of continuous semantic
+features, cannot be directly transmitted to digital communica-
+tion. Hence, the quantizer Q(·) is adopted to map the semantic
+feature Z into the bitstream Zq.
+B. Modulation and Wireless Channel
+Then, the bitstream Zq is modulated by a digital modulation
+scheme, which can be a traditional method (e.g., BPSK, QAM,
+etc.), and transmitted over a wireless channel. This article
+considers a general model of fading channels with the function
+denoted as follows
+Y = h ∗X + n (2)
+where h denotes the channel state information (CSI) vector,
+n ∼ N(0,σ
+2I) is an independent and identically distributed
+(i.i.d.) Gaussian noise vector with variance σ2 for each
+channel, and I is the identity matrix.
+Subsequently, the received signal Y is demodulated to
+recover the bitstream ˆZq via a demodulator.
+C. Decoder
+After demodulation of the received signal Y, the decoder
+obtains the bitstream ˆZq. The bitstream will ﬁrst be dequan-
+tized to recover the semantic features. Subsequently, the
+semantic decoder will reconstruct the transmitted signal ˆS from
+semantic features, which can be formulated by
+ˆS = fd
+(
+ˆZq
+)
+= gd
+(
+Q−1( ˆZq)
+)
+(3)
+where fd(·) include the semantic decoder gd(·) and dequantizer
+Q(·) with learnable parameters. In order to obtain the recon-
+structed signal ˆS, the output of the dequantizer ˆZ = Q−1( ˆZq),
+which is a series of continuous semantic features, is directly
+transmitted to the semantic decoder.
+To design an effective semantic communication system,
+the optimization goal is to minimize the semantic distortion
+between the transmitter and receiver while enhancing the task
+performance at the receiver. Speciﬁcally, the mean-square error
+(MSE) function is adopted to measure the semantic distortion
+and the task performance, which can be computed as
+L
+sem =∥ Z − ˆZ∥2
+2 (4)
+Ltask = 1
+T ∥ ˆS − S∥2
+2 (5)
+where Lsem and Ltask denote the semantic distortion and the
+task performance, respectively. To achieve these objectives,
+the overall optimization objective is formulated as a joint
+loss function, incorporating both semantic distortion and task
+performance at the receiver, which can be expressed as
+min
+θ
+αLsem + βLtask (6)
+where θ is the parameter of the encoder and decoder; α and β
+are hyperparameters; and Lsem and Ltask denote the semantic
+distortion and the task performance, respectively.
+III. M ULTISCALE SEMANTIC CODEC AT LOW BITRATE
+In this section, we ﬁrst develop a low-bitrate multiscale
+semantic codec that delivers high-quality decoded speech.
+As shown in Fig. 2, this module includes semantic codec,
+quantizer, and discriminator. Then, the training strategy will
+be introduced.
+A. Multiscale Semantic Codec
+In order to implement a digital semantic communication
+system for low bitrate transmission with high reconstruction
+quality, we propose a multiscale semantic codec module based
+on RVQGAN, an encoder–decoder network with residual VQ
+(RVQ) [25], [26], [27]. The multiscale semantic codec is a
+generative model primarily composed of a semantic encoder,
+a quantizer, and a semantic decoder. It operates by gener-
+ating high-quality semantic features, which are subsequently
+quantized, dequantized, and decoded to produce high-quality
+reconstructed audio. During training, the process is guided and
+constrained by a discriminator. Speciﬁcally, this module ﬁrst
+performs semantic feature extraction on the input signal at
+the receiver. Then, in order to adapt to the existing digital
+communication systems, the continuous semantic features are
+Authorized licensed use limited to: Beijing Jiaotong University. Downloaded on January 25,2026 at 06:52:47 UTC from IEEE Xplore.  Restrictions apply. 

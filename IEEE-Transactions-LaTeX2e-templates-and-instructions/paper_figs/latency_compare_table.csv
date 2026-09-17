@@ -1,0 +1,4 @@
+Method,Sample rate (kHz),Bitrate (bps),Delay (s)
+PDSSC,16.0,3000,0.151383
+EnCodec + LFR-PLC,24.0,3000,0.103313
+ESC + LFR-PLC,16.0,3000,0.330205

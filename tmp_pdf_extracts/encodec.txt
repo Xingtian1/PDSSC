@@ -1,0 +1,179 @@
+--- PAGE 1 ---
+High Fidelity Neural Audio Compression
+Alexandre Défossez∗ defossez@meta.com
+Meta AI, F AIR Team, Paris, France
+Jade Copet∗ jadecopet@meta.com
+Meta AI, F AIR Team, Paris, France
+Gabriel Synnaeve† gab@meta.com
+Meta AI, F AIR Team, Paris, France
+Yossi Adi† adiyoss@meta.com
+Meta AI, F AIR Team, Tel-Aviv, Israel
+Abstract
+We introduce a state-of-the-art real-time, high-ﬁdelity, audio codec leveraging neural networks.
+It consists in a streaming encoder-decoder architecture with quantized latent space trained
+in an end-to-end fashion. We simplify and speed-up the training by using a single multiscale
+spectrogram adversary that eﬃciently reduces artifacts and produce high-quality samples.
+We introduce a novel loss balancer mechanism to stabilize training: theweight of a loss now
+deﬁnes the fraction of the overall gradient it should represent, thus decoupling the choice of
+this hyper-parameter from the typical scale of the loss. Finally, we study how lightweight
+Transformer models can be used to further compress the obtained representation by up to
+40%, while staying faster than real time. We provide a detailed description of the key design
+choices of the proposed model including: training objective, architectural changes and a study
+of various perceptual loss functions. We present an extensive subjective evaluation (MUSHRA
+tests) together with an ablation study for a range of bandwidths and audio domains, including
+speech, noisy-reverberant speech, and music. Our approach is superior to the baselines
+methods across all evaluated settings, considering both 24 kHz monophonic and 48 kHz
+stereophonic audio. Code and models are available at github.com/facebookresearch/encodec.
+1 Introduction
+Recent studies suggest that streaming audio and video have accounted for the majority of the internet traﬃc
+in 2021 (82% according to (Cisco, 2021)). With the internet traﬃc expected to grow, audio compression
+is an increasingly important problem. In lossy signal compression we aim at minimizing the bitrate of a
+sample while also minimizing the amount of distortion according to a given metric, ideally correlated with
+human perception. Audio codecs typically employ a carefully engineered pipeline combining an encoder and
+a decoder to remove redundancies in the audio content and yield a compact bitstream. Traditionally, this
+is achieved by decomposing the input with a signal processing transform and trading oﬀ the quality of the
+components that are less likely to inﬂuence perception. Leveraging neural networks as trained transforms via
+an encoder-decoder mechanism has been explored by Morishima et al. (1990); Rippel et al. (2019); Zeghidour
+et al. (2021). Our research work is in the continuity of this line of work, with a focus on audio signals.
+The problems arising in lossy neural compression models are twofold: ﬁrst, the model has to represent a
+wide range of signals, such as not to overﬁt the training set or produce artifact laden audio outside its
+comfort zone. We solve this by having a large and diverse training set (described in Section 4.1), as well
+as discriminator networks (see Section 3.4) that serve as perceptual losses, which we study extensively in
+Section 4.5.1, Table 2. The other problem is that of compressing eﬃciently, both in compute time and in size.
+∗,†Equal contribution.
+1
+arXiv:2210.13438v1  [eess.AS]  24 Oct 2022
+--- PAGE 2 ---
+Figure 1: EnCodec : an encoder decoder codec architecture which is trained with reconstruction (ℓf and
+ℓt) as well as adversarial losses (ℓg for the generator andℓd for the discriminator). The residual vector
+quantization commitment loss (ℓw) applies only to the encoder. Optionally, we train a small Transformer
+language model for entropy coding over the quantized units withℓl, which reduces bandwidth even further.
+For the former, we limit ourselves to models that run in real-time on a single CPU core. For the latter, we
+use residual vector quantization of the neural encoder ﬂoating-point output, for which various approaches
+have been proposed (Van Den Oord et al., 2017; Zeghidour et al., 2021).
+Accompanying those technical contributions, we posit that designing end-to-end neural compression models is
+a set of intertwined choices, among which at least the encoder-decoder architecture, the quantization method,
+and the perceptual loss play key parts. Objective evaluations exist and we report scores on them in our
+ablations (Section 4.5.1). But the evaluation of lossy audio codecs necessarily relies on human perception, so
+we ran extensive human evaluation for multiple points in this design space, both for speech and music. Those
+evaluations (MUSHRA) consist in having humans listen to, compare, and rate excerpts of speech or music
+compressed with competitive codecs and variants of our method, and the uncompressed ground truth. This
+allows to compare variants of the whole pipeline in isolation, as well as their combined eﬀect, in Section 4.5.1
+(Figure 3 and Table 1). Finally, our best model,EnCodec , reaches state-of-the-art scores for speech and for
+music at 1.5, 3, 6, 12 kbps at 24 kHz, and at 6, 12, and 24 kbps for 48 kHz with stereo channels.
+2 Related Work
+Speech and Audio Synthesis.Recent advancements in neural audio generation enabled computers to
+eﬃciently generate natural sounding audio. The ﬁrst convincing results were achieved by autoregressive
+models such as WaveNet (Oord et al., 2016), at the cost of slow inference. While many other approaches were
+explored (Yamamoto et al., 2020a; Kalchbrenner et al., 2018; Goel et al., 2022), the most relevant ones here
+are those based on Generative Adversarial Networks (GAN) (Kumar et al., 2019; Yamamoto et al., 2020a;
+Kong et al., 2020; Andreev et al., 2022) were able to match the quality of autoregressive by combining various
+adversarial networks operate at diﬀerent multi-scale and multi-period resolutions. Our work uses and extends
+similar adversarial losses to limit artifacts during audio generation.
+Audio Codec. Low bitrate parametric speech and audio codecs have long been studied (Atal & Hanauer,
+1971; Juang & Gray, 1982), but their quality has been severely limited. Despite some advances (Griﬃn
+& Lim, 1985; McCree et al., 1996), modeling the excitation signal has remained a challenging task. The
+current state-of-the-art traditional audio codecs are Opus (Valin et al., 2012) and Enhanced Voice Service
+(EVS) (Dietz et al., 2015). These methods produce high coding eﬃciency for general audio while supporting
+various bitrates, sampling rates, and real-time compression.
+2
+--- PAGE 3 ---
+Neural based audio codecs have been recently proposed and demonstrated promising results (Kleijn et al.,
+2018; Valin & Skoglund, 2019b; Lim et al., 2020; Kleijn et al., 2021; Zeghidour et al., 2021; Omran et al.,
+2022; Lin et al., 2022; Jayashankar et al., 2022; Li et al.; Jiang et al., 2022), where most methods are based on
+quantizing the latent space before feeding it to the decoder. In Valin & Skoglund (2019b), an LPCNet (Valin
+& Skoglund, 2019a) vocoder was conditioned on hand-crafted features and a uniform quantizer. Gârbacea
+et al. (2019) conditioned a WaveNet based model on discrete units obtained from a VQ-VAE (Van Den Oord
+et al., 2017; Razavi et al., 2019) model, while Skoglund & Valin (2019) tried feeding the Opus codec (Valin
+et al., 2012) to a WaveNet to further improve its perceptual quality. Jayashankar et al. (2022); Jiang et al.
+(2022) propose an auto-encoder with a vector quantization layer applied over the latent representation and
+minimizing the reconstruction loss, while Li et al. suggested using Gumbel-Softmax (GS) (Jang et al., 2017)
+for representation quantization. The most relevant related work to ours is the SoundStream model (Zeghidour
+et al., 2021), in which the authors propose a fully convolutional encoder decoder architecture with a Residual
+Vector Quantization (RVQ) (Gray, 1984; Vasuki & Vanathi, 2006) layers. The model was optimized using
+both reconstruction loss and adversarial perceptual losses.
+Audio Discretization.Representing audio and speech using discrete values was proposed to various tasks
+recently. Dieleman et al. (2018); Dhariwal et al. (2020) proposed a hierarchical VQ-VAE based model for
+learning discrete representation of raw audio, next combined with an auto-regressive model, demonstrating
+the ability to generate high quality music. Similarly, Lakhotia et al. (2021); Kharitonov et al. (2021)
+demonstrated that self-supervised learning methods for speech (e.g., HuBERT (Hsu et al., 2021)), can be
+quantized and used for conditional and unconditional speech generation. Similar methods were applied
+to speech resynthesis (Polyak et al., 2021), speech emotion conversion (Kreuk et al., 2021), spoken dialog
+system (Nguyen et al., 2022), and speech-to-speech translation (Lee et al., 2021a;b; Popuri et al., 2022).
+3 Model
+An audio signal of durationd can be represented by a sequencex∈ [−1, 1]Ca×T with Ca the number of
+audio channels,T =d·fsr the number of audio samples at a given sample ratefsr. The EnCodec model is
+composed of three main components: (i) First, an encoder networkE is input an audio extract and outputs a
+latent representation z; (ii) Next, a quantization layerQ produces a compressed representationzq, using
+vector quantization; (iii) Lastly, a decoder networkG reconstructs the time-domain signal, ˆx, from the
+compressed latent representationzq. The whole system is trained end-to-end to minimize a reconstruction loss
+applied over both time and frequency domain, together with a perceptual loss in the form of discriminators
+operating at diﬀerent resolutions. A visual description of the proposed method can be seen in Figure 1.
+3.1 Encoder & Decoder Architecture
+The EnCodec model is a simple streaming, convolutional-based encoder-decoder architecture with sequential
+modeling component applied over the latent representation, both on the encoder and on the decoder side.
+Such modeling framework was shown to provide great results in various audio-related tasks, e.g., source
+separation and enhancement (Défossez et al., 2019; Defossez et al., 2020), neural vocoders (Kumar et al., 2019;
+Kong et al., 2020), audio codec (Zeghidour et al., 2021), and artiﬁcial bandwidth extension (Tagliasacchi
+et al., 2020; Li et al., 2021). We use the same architecture for 24 kHz and 48 kHz audio.
+Encoder-Decoder. The encoder modelE consists in a 1D convolution withC channels and a kernel size of
+7 followed byB convolution blocks. Each convolution block is composed of a single residual unit followed by
+a down-sampling layer consisting in a strided convolution, with a kernel sizeK of twice the strideS. The
+residual unit contains two convolutions with kernel size 3 and a skip-connection. The number of channels
+is doubled whenever down-sampling occurred. The convolution blocks are followed by a two-layer LSTM
+for sequence modeling and a ﬁnal 1D convolution layer with a kernel size of 7 andD output channels.
+Following Zeghidour et al. (2021); Li et al. (2021), we useC = 32,B = 4 and (2, 4, 5, 8) as strides. We use
+ELU as a non-linear activation function (Clevert et al., 2015) either layer normalization (Ba et al., 2016) or
+weight normalization (Salimans & Kingma, 2016). We use two variants of the model, depending on whether
+we target the low-latency streamable setup, or a high ﬁdelity non-streamable usage. With this setup, the
+encoder outputs 75 latent steps per second of audio at 24 kHz, and 150 at 48 kHz. The decoder mirrors the
+3
+--- PAGE 4 ---
+encoder, using transposed convolutions instead of strided convolutions, and with the strides in reverse order
+as in the encoder, outputting the ﬁnal mono or stereo audio.
+Non-streamable. In the non-streamable setup, we use for each convolution a total padding ofK−S,
+split equally before the ﬁrst time step and after the last one (with one more before ifK−S is odd). We
+further split the input into chunks of 1 seconds, with an overlap of 10 ms to avoid clicks, and normalize each
+chunk before feeding it to the model, applying the inverse operation on the output of the decoder, adding a
+negligible bandwidth overhead to transmit the scale. We use layer normalization (Ba et al., 2016), computing
+the statistics including also the time dimension in order to keep the relative scale information.
+Streamable. For the streamable setup, all padding is put before the ﬁrst time step. For a transposed
+convolution with strides, we output thes ﬁrst time steps, and keep the remainings steps in memory
+for completion when the next frame is available, or discarding it at the end of a stream. Thanks to this
+padding scheme, the model can output 320 samples (13 ms) as soon as the ﬁrst 320 samples (13 ms) are
+received. We replace the layer normalization with statistics computed over the time dimension with weight
+normalization (Salimans & Kingma, 2016), as the former is ill-suited for a streaming setup. We notice a small
+gain over the objective metrics by keeping a form of normalization, as demonstrated in Table A.3.
+3.2 Residual Vector Quantization
+We use Residual Vector Quantization (RVQ) to quantize the output of the encoder as introduced by Zeghidour
+et al. (2021). Vector quantization consists in projecting an input vector onto the closest entry in a codebook
+of a given size. RVQ reﬁnes this process by computing the residual after quantization, and further quantizing
+it using a second codebook, and so forth.
+We follow the same training procedure as described by Dhariwal et al. (2020) and Zeghidour et al. (2021).
+The codebook entry selected for each input is updated using an exponential moving average with a decay
+of 0.99, and entries that are not used are replaced with a candidate sampled from the current batch. We
+use a straight-through-estimator (Bengio et al., 2013) to compute the gradient of the encoder, e.g. as if the
+quantization step was the identity function during the backward phase. Finally, a commitment loss, consisting
+of the MSE between the input of the quantizer and its output, with gradient only computed with respect to
+its input, is added to the overall training loss.
+By selecting a variable number of residual steps at train time, a single model can be used to support multiple
+bandwidth target (Zeghidour et al., 2021). For all of our models, we use at most 32 codebooks (16 for the 48
+kHz models) with 1024 entries each, e.g. 10 bits per codebook. When doing variable bandwidth training, we
+select randomly a number of codebooks as a multiple of 4, i.e. corresponding to a bandwidth 1.5, 3, 6, 12
+or 24 kbps at 24 kHz. Given a continuous latent represention with shape[B,D,T ] that comes out of the
+encoder, this procedure turns it into a discrete set of indexes[B,Nq,T ] with Nq the number of codebooks
+selected. This discrete representation can changed again to a vector by summing the corresponding codebook
+entries, which is done just before going into the decoder.
+3.3 Language Modeling and Entropy Coding
+We additionally train a small Transformer based language model (Vaswani et al., 2017) with the objective
+of keeping faster than real time end-to-end compression/decompression on a single CPU core. The model
+consists of 5 layers, 8 heads, 200 channels, a dimension of 800 for the feed-forward blocks, and no dropout.
+At train time, we select a bandwidth and the corresponding number of codebooksNq. For a time stept, the
+discrete representation obtained at timet− 1 is transformed into a continuous representation using learnt
+embedding tables, one for each codebook, and which are summed. Fort = 0, a special token is used instead.
+The output of the Transformer is fed intoNq linear layers with as many output channels as the cardinality of
+each codebook (e.g. 1024), giving us the logits of the estimated distribution over each codebook for timet.
+We thus neglect potential mutual information between the codebooks at a single time step. This allows to
+speedup inference (as opposed to having one time step per codebook, or a multi-stage prediction) with a
+limited impact over the ﬁnal cross entropy. Each attention layer has a causal receptive ﬁeld of 3.5 seconds,
+4

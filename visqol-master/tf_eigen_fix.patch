@@ -1,0 +1,25 @@
+--- a/tensorflow/lite/kernels/internal/optimized/optimized_ops.h
++++ b/tensorflow/lite/kernels/internal/optimized/optimized_ops.h
+@@ -3257,9 +3257,9 @@
+         const int w_end = std::min(wpad / stride_width + 1, output_width);
+         // pre-compute square
+         const int in_offset = w + input_width * (h + input_height * b);
+-        in_square =
+-            in_mat.col(in_offset).array() * in_mat.col(in_offset).array();
++        in_square =
++            (in_mat.col(in_offset).array() * in_mat.col(in_offset).array()).matrix();
+         // compute elementwise sum of squares
+         for (int ph = h_start; ph < h_end; ++ph) {
+           for (int pw = w_start; pw < w_end; ++pw) {
+@@ -3271,8 +3271,8 @@
+     }
+   }
+
+-  out_count = out_count.array().inverse();
++  out_count = out_count.array().inverse().matrix();
+   out_mat =
+-      (out_mat.array().rowwise() * out_count.transpose().array()).cwiseSqrt();
++      (out_mat.array().rowwise() * out_count.transpose().array()).sqrt().matrix();
+
+   const int flat_size = output_shape.FlatSize();
+   for (int i = 0; i < flat_size; ++i) {

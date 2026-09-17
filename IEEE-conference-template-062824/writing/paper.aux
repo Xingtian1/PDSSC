@@ -1,0 +1,69 @@
+\relax 
+\citation{3gpp_ntn,cheng2022sagin,ngmn_ntn}
+\citation{guler2018semantic,xie2021deepsc}
+\citation{iso_aac,valin2012opus}
+\citation{xie2021deepsc,xiao2023dsst}
+\citation{defossez2023encodec}
+\citation{chen2025rvqgan}
+\citation{tian2025lsm}
+\citation{han2025esc}
+\@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {II}System Model and Problem Formulation}{2}{}\protected@file@percent }
+\citation{oord2017vqvae}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Overall architecture of the proposed PDSSC system.}}{3}{}\protected@file@percent }
+\newlabel{fig:system_model}{{1}{3}{}{figure.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {III}Proposed Method}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-A}}Semantic-Priority Layered Codec}{3}{}\protected@file@percent }
+\citation{lipman2023flow}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Architecture of the semantic-priority layered codec.}}{4}{}\protected@file@percent }
+\newlabel{fig:codec_arch}{{2}{4}{}{figure.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-B}}Low-Step Flow Completion With Speaker-Side Information}{4}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Architecture and Stage-II training of the low-step flow completion module.}}{5}{}\protected@file@percent }
+\newlabel{fig:timbreflow_arch}{{3}{5}{}{figure.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Internal structure of the shared residual block used in both the layered codec (Stage~I) and the flow completion network (Stage~II).}}{5}{}\protected@file@percent }
+\newlabel{fig:resblock}{{4}{5}{}{figure.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-C}}Channel-Adaptive Bitrate Control}{5}{}\protected@file@percent }
+\newlabel{eq:rd_cost}{{17}{5}{}{equation.17}{}}
+\newlabel{eq:rd_rule}{{18}{5}{}{equation.18}{}}
+\newlabel{eq:ctrl_loss}{{21}{5}{}{equation.21}{}}
+\citation{panayotov2015librispeech}
+\citation{hines2015visqol}
+\citation{saeki2022utmos}
+\citation{diener2023plcmos}
+\@writefile{toc}{\contentsline {section}{\numberline {IV}Experimental Setup}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {V}Experimental Results and Analysis}{6}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Audio quality performance of PDSSC and competing methods at different bitrates under 5\% packet loss: (a) ViSQOL, (b) UTMOS.}}{6}{}\protected@file@percent }
+\newlabel{fig:rate}{{5}{6}{}{figure.5}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Layer-wise feature visualization of PDSSC and EnCodec: first layer, second layer, and summed Layers 2--8.}}{7}{}\protected@file@percent }
+\newlabel{fig:disentangle}{{6}{7}{}{figure.6}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Audio quality performance of PDSSC and competing methods under different packet loss rates: (a) ViSQOL, (b) PLCMOS.}}{7}{}\protected@file@percent }
+\newlabel{fig:plr}{{7}{7}{}{figure.7}{}}
+\bibcite{3gpp_ntn}{1}
+\bibcite{cheng2022sagin}{2}
+\bibcite{ngmn_ntn}{3}
+\bibcite{guler2018semantic}{4}
+\bibcite{xie2021deepsc}{5}
+\bibcite{iso_aac}{6}
+\bibcite{valin2012opus}{7}
+\bibcite{xiao2023dsst}{8}
+\bibcite{defossez2023encodec}{9}
+\bibcite{chen2025rvqgan}{10}
+\bibcite{tian2025lsm}{11}
+\bibcite{han2025esc}{12}
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Ablation results of the flow completion module under different packet loss rates: (a) ViSQOL, (b) PLCMOS.}}{8}{}\protected@file@percent }
+\newlabel{fig:ablation}{{8}{8}{}{figure.8}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Mel-spectrogram comparison of PDSSC and competing methods on a representative test case.}}{8}{}\protected@file@percent }
+\newlabel{fig:mel_compare}{{9}{8}{}{figure.9}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces Model complexity of the proposed PDSSC system.}}{8}{}\protected@file@percent }
+\newlabel{tab:complexity}{{I}{8}{}{table.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces End-to-end latency comparison of PDSSC and competing methods.}}{8}{}\protected@file@percent }
+\newlabel{tab:latency}{{II}{8}{}{table.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VI}Conclusion}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{References}{8}{}\protected@file@percent }
+\bibcite{oord2017vqvae}{13}
+\bibcite{lipman2023flow}{14}
+\bibcite{panayotov2015librispeech}{15}
+\bibcite{hines2015visqol}{16}
+\bibcite{saeki2022utmos}{17}
+\bibcite{diener2023plcmos}{18}
+\gdef \@abspage@last{9}

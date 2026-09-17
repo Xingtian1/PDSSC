@@ -1,0 +1,645 @@
+pages: 6
+
+--- PAGE 1 ---
+A Two-Stage LLM-Enhanced DDoS Detection
+Framework for Next-Generation IoT and Edge
+Networks
+Ali Alfatemi
+Fordham Univ.
+NY , USA
+aalfatemi@fordham.edu
+Mohamed Rahouti
+Fordham Univ.
+NY , USA
+mrahouti@fordham.edu
+Zakirul Alam Bhuiyan
+Fordham Univ.
+NY , USA
+mbhuiyan3@fordham.edu
+Abdellah Chehri
+Royal Military College
+ON, Canada
+chehri@rmc.ca
+Aiman Solyman
+Univ. of Milano
+Milan, Italy
+aiman.solyman@unimi.it
+Abstract—The rapid expansion of IoT and edge networks has
+increased vulnerability to security threats, notably Distributed
+Denial-of-Service (DDoS) attacks, which target the application
+layer and can overwhelm networks. This paper introduces a
+novel two-stage DDoS detection pipeline for IoT and edge
+networks that utilizes large language model (LLM) embeddings
+for textual protocol fields along with numeric features like TCP
+handshake metrics. The first stage accurately identifies traffic as
+Normal or DDoS, while the second stage classifies confirmed
+DDoS flows into specific types (UDP, ICMP, TCP, HTTP),
+correcting any initial false positives. Comprehensive testing on
+a specialized IoT dataset demonstrated perfect detection rates
+of 100% in the first stage and 99.91% in subclass classification,
+highlighting the effectiveness of combining LLM-based textual
+data with traditional numeric indicators for advanced intrusion
+detection.
+Index Terms —DDoS detection, IoT security, LLM, textual
+embeddings, edge computing, machine learning
+I. I NTRODUCTION
+The exponential proliferation of Internet of Things (IoT)
+and Industrial IoT (IIoT) devices has significantly reshaped
+contemporary network infrastructures [1], enabling transfor-
+mative applications in healthcare, manufacturing, transporta-
+tion, and various smart-city contexts. However, this rapid con-
+nectivity also exposes critical vulnerabilities [2], [3]. Among
+the most disruptive and pervasive threats are DDoS attacks,
+which can flood targets with overwhelming traffic and degrade
+or incapacitate entire networks [4]–[6]. Traditional solutions
+for DDoS detection have often hinged on packet-level or flow-
+level numeric metrics, such as TCP flags, payload sizes, or
+flow timeouts [7]. Still, these approaches frequently struggle
+to adapt to emerging, more subtle DDoS vectors that may
+exhibit obfuscation or dynamically shifting signatures [8].
+In parallel, large language models (LLMs) have advanced
+to the point of capturing nuanced semantic patterns not only
+in natural language text but also in semi-structured protocol
+fields (e.g., HTTP request lines and MQTT topics) [9], [10].
+Such textual content can reveal malicious behaviors at the
+application layer that numeric features alone might miss [11]–
+[13]. Drawing on this insight, the present study proposes a
+two-stage DDoS detection pipeline for next-generation IoT
+and edge networks. The first stage performs a coarse separa-
+tion between benign (Normal) and malicious (DDoS) traffic.
+In the second stage, any flows flagged as DDoS are sub-
+classified into one of four principal DDoS variants (UDP,
+ICMP, TCP, HTTP) or restored to Normal if the initial
+decision was a false positive.
+By systematically embedding textual protocol fields (e.g.,
+http.request.method, mqtt.topic) via the all-
+MiniLM-L6-v2 transformer model, the pipeline fuses se-
+mantic signals with conventional numeric features (e.g.,
+TCP handshake counts). Through comprehensive experimen-
+tation on a curated five-class subset of the ML-EdgeIIoT-
+dataset [14], we demonstrate that numeric-plus-textual data
+reliably identifies not only the presence of DDoS but also
+the specific subclass of the attack. Our results show that
+Stage 1 can reach a perfect 100% separation of Normal
+vs. DDoS, while Stage 2 yields near-perfect performance in
+distinguishing sub-classes or correcting Stage 1 errors. The
+key contributions of this work are summarized as follows,
+highlighting the novel methodologies and significant findings
+introduced in this study:
+• Introduce a two-stage detection framework that first
+separates normal traffic from DDoS attacks and then
+classifies malicious traffic into one of five categories
+(Normal, UDP, ICMP, TCP, HTTP) to improve detection
+accuracy and mitigate false positives.
+• Leverage embeddings from the all-MiniLM-L6-v2 trans-
+former model to capture nuanced patterns in textual
+protocol fields (e.g., HTTP methods, MQTT topics),
+combining these with traditional numeric features for
+enhanced DDoS detection.
+• Achieve a 100% detection rate in the initial classification
+stage and 99.91% accuracy in the subclass classification
+stage using a curated IoT/edge dataset, showcasing the
+effectiveness of combining numeric and textual features.
+• Demonstrate a flexible pipeline structure that can adapt
+to different IoT and edge network contexts, enabling
+both accurate attack detection and targeted mitigation
+strategies for evolving DDoS threats.
+The rest of this paper is arranged as follows. Section II
+reviews related DDoS detection research and LLM-based
+embeddings for protocol analysis. Section III outlines the
+2025 IEEE Global Communications Conference: Communication & Information Systems Security
+7
+GLOBECOM 2025 - 2025 IEEE Global Communications Conference | 979-8-3315-7781-0/25/$31.00 ©2025 IEEE | DOI: 10.1109/GLOBECOM59602.2025.11431718
+Authorized licensed use limited to: Beijing Jiaotong University. Downloaded on April 21,2026 at 16:20:58 UTC from IEEE Xplore.  Restrictions apply. 
+
+--- PAGE 2 ---
+proposed detection pipeline, including data handling and
+multi-stage classification techniques. Section IV details the
+experimental procedures and metrics. Section V presents and
+analyzes the results. Section VI discusses the implications,
+limitations, and future research directions. The paper con-
+cludes in Section VII.
+II. B ACKGROUND AND RELATED WORK
+The security of IoT and IIoT ecosystems has prompted a
+surge of research focused on defending against DDoS attacks
+[15]. Early detection systems typically relied on threshold-
+based rules or purely statistical analyses, which had lim-
+ited adaptability when confronted with evolving malicious
+patterns [5], [16]. Later, machine learning (ML) approaches
+harnessed numeric features—such as flow rates, TCP flag
+distributions, and inter-packet timings—to isolate suspicious
+traffic with moderate success [4], [17]. Yet, these numeric-
+only techniques sometimes fail to capture application-layer
+abuses embedded in textual fields, such as anomalous HTTP
+methods or manipulated MQTT parameters.
+Recent progress in large language modeling has shown the
+value of embeddings in capturing subtle textual indicators
+of malicious behavior [11], [18]. Protocol fields written as
+ASCII text (like GET, POST, SUBSCRIBE, or custom URIs)
+can harbor clues that numeric features miss. For instance,
+covert DDoS attacks might keep packet rates moderate but
+systematically craft suspicious method calls [19]. The synergy
+between numeric and textual embeddings has thus emerged as
+a powerful strategy for intrusion detection.
+Two-stage classification pipelines have been proposed in
+scenarios beyond DDoS—such as general intrusion detec-
+tion—yet the typical approach merges all DDoS traffic into a
+single malicious label [14]. Differentiating among sub-classes
+(UDP floods, ICMP floods, TCP-SYN floods, or HTTP-
+based layer-7 attacks) proves invaluable for designing targeted
+mitigation policies. Another nuance arises from the possibility
+of false positives in the initial detection stage: robust pipelines
+can rectify mistakes if the second stage includes a Normal
+output among its sub-class labels.
+Against this backdrop, our work capitalizes on textual
+embeddings from the all-MiniLM-L6-v2 transformer to in-
+corporate protocol-level semantics integrated with numeric
+domain features (e.g., TCP len, content length, handshake
+counts). We demonstrate that a carefully constructed two-stage
+pipeline can effectively isolate normal traffic, sort out DDoS
+sub-classes, and correct Stage 1 misclassifications if necessary.
+In parallel to our approach, simpler intrusion detection
+pipelines exist based solely on flow statistics and machine
+learning. For example, [20] demonstrates how an SDN-based
+IDS, leveraging only numeric features, can achieve strong
+performance for botnet detection. However, such purely statis-
+tical or binary classifiers typically merge all malicious traffic
+into a single category (malicious vs. normal). In contrast, our
+two-stage framework provides fine-grained sub-classification
+of DDoS (e.g., UDP, TCP, HTTP-based layer-7) and leverages
+Fig. 1. High-level depiction of the two-stage pipeline. Data are filtered into
+five classes (Normal, DDoS UDP, DDoS ICMP, DDoS TCP, DDoS HTTP).
+Numeric and textual columns are extracted and processed, then fed to Stage 1
+(Normal vs. DDoS). Flows predicted as malicious proceed to Stage 2,
+classifying them to one of five final labels (Normal, UDP, ICMP, TCP, HTTP).
+textual embeddings to capture sophisticated application-layer
+threats.
+III. M ETHODOLOGY
+The pipeline of the proposed framework consists of two
+classification stages that operate on numeric flow metrics
+and textual embeddings extracted from protocol-level columns
+(e.g., HTTP or MQTT). Each stage employs XGBoost gradi-
+ent boosting for robust classification, with distinct training
+sets and objectives. Figure 1 provides a schematic overview,
+showing the main data flows and transformations.
+The detailed algorithm for the proposed pipeline is outlined
+in Algorithm 1, which systematically integrates numeric and
+textual features for DDoS detection. Stage 1 focuses on
+binary classification to separate normal traffic from potential
+DDoS flows, leveraging both domain-specific numeric metrics
+and high-dimensional textual embeddings. Flows identified as
+malicious in Stage 1 proceed to Stage 2, where a refined multi-
+class classification is performed to assign specific DDoS sub-
+class labels or correct false positives. This two-stage approach
+ensures accurate detection while minimizing misclassifica-
+tion, making it adaptable to heterogeneous IoT and edge
+network environments. This structured methodology forms
+the backbone of the pipeline, ensuring robust and scalable
+DDoS detection. Details about the key pipeline components
+are discussed next.
+A. Data Filtering and Preprocessing
+Our experiments focus on a filtered subset of the ML-
+EdgeIIoT-dataset [14], retaining Normal plus four major
+DDoS variants (UDP, ICMP, TCP, HTTP). For clarity, we ex-
+clude other classes (e.g., scanning and ransomware). Given the
+dataset’s imbalance, we limit Normal to 20,000 samples and
+each DDoS sub-class to 15,000. After removing duplicates
+and incomplete rows, the final shape is typically around 70k
+records. These data are split into an 80% training set and 20%
+test set, ensuring stratification of all five classes.
+B. Balancing and Dimensionality Reduction
+The initial downsampling partially offsets class imbalance
+within the training data but still often persists. SMOTE [21]
+is applied to oversample the minority class in each training
+fold of Stage 1 (Normal vs. DDoS). Similarly, if specific
+DDoS sub-classes remain under-represented for the sub-class
+2025 IEEE Global Communications Conference: Communication & Information Systems Security
+8
+Authorized licensed use limited to: Beijing Jiaotong University. Downloaded on April 21,2026 at 16:20:58 UTC from IEEE Xplore.  Restrictions apply. 
+
+--- PAGE 3 ---
+training in Stage 2, SMOTE can also balance them. We then
+employ simple dimensionality pruning, including a variance
+threshold (removing features with negligible variance) and
+SelectKBest (e.g., K = 200) based on ANOV A F-values,
+to reduce computational overhead and the risk of overfitting.
+Algorithm 1 Two-Stage LLM-enhanced DDoS detection pro-
+cedure.
+1: Input:
+• Network traffic dataset D = {(x1, y1), . . . , (xN , yN )} containing both
+numeric and textual features.
+• Each sample xi has:
+– Numeric features ni (e.g., packet sizes, TCP handshake metrics).
+– Textual features ti (e.g., HTTP methods, MQTT topics).
+• Ground-truth label yi, where
+• yi ∈ {Normal, DDoS-UDP, DDoS-ICMP, DDoS-TCP, DDoS-HTTP}.
+2: Output:
+• Two trained classifiers M1 (Stage 1: Normal vs. DDoS) and M2 (Stage 2:
+sub-classification).
+• Pipeline that, given new samples, predicts the final label (Normal or one of
+the DDoS sub-classes).
+3: procedure TRAIN PIPELINE
+Step A: Preprocessing and Feature Extraction
+4: for each sample xi ∈ D do
+5: Extract numeric features ni ▷ e.g., flow duration, TCP flags, content
+length
+6: Embed textual features ti ▷ Use a sentence-transformer like
+all-MiniLM-L6-v2
+7: Let ei = Embed(ti) ▷ e i is a 384-dim embedding, if only one text
+column
+8: zi = Concat(ni, ei) ▷ Merge numeric + embedded textual features
+9: end for
+Step B: Data Splits and Balancing
+10: Split D into training set Dtrain (80%) and test set Dtest (20%), stratified by
+class
+11: Optionally apply SMOTE/oversampling to Dtrain ▷ Balance Normal and
+DDoS classes
+Step C: Stage 1 Classifier (Binary: Normal vs. DDoS)
+12: Relabel yi as Normal=0 or DDoS=1
+13: Train XGBoost model M1 on Dtrain ▷ Tuning hyperparams via grid search
+14: Evaluate M1 on Dtest ▷ Check accuracy, confusion matrix (Normal vs. DDoS)
+Step D: Stage 2 Classifier (Multi-Class: Normal, UDP, ICMP, TCP, HTTP)
+15: Filter Dtrain to get only DDoS samples (plus a small portion of Normal) ▷
+We want M2 to distinguish among DDoS sub-classes, but also allow “Normal” if
+Stage 1 was a false positive.
+16: Train a second XGBoost model M2 (multi-class) using the sub-class labels:
+Normal, DDoS-UDP, DDoS-ICMP, DDoS-TCP, DDoS-HTTP
+17: Evaluate M2 on Dtest (only DDoS samples plus some Normal) ▷ Check
+multi-class confusion matrix, e.g. 5x5
+18: Return {M1, M2} ▷ Trained Stage 1 and Stage 2 models
+19: end procedure
+20: procedure INFERENCE ((classifying new traffic sample) )
+21: Input: New sample ˜x with numeric features ˜n, textual features ˜t
+22: Extract numeric features ˜n
+23: ˜e = Embed(˜t) ▷ Obtain text embedding via the same model as training
+24: ˜z = Concat(˜n, ˜e)
+Stage 1 Prediction
+25: ˆy1 = M1(˜z) ▷ Binary: Normal or DDoS
+26: if ˆy1 = Normal then
+27: return Normal ▷ Stop here; sample is presumed benign
+28: else
+Stage 2 Prediction
+29: ˆy2 = M2(˜z) ▷ Possible outputs: Normal, UDP, ICMP, TCP, HTTP
+30: return ˆy2 ▷ Sub-class label or Normal if Stage 1 was false alarm
+31: end if
+32: end procedure
+C. Stage 1: Binary Normal vs. DDoS Classification
+All training samples—Normal and four DDoS variants—are
+grouped into two labels: Normal (0) and DDoS (1). XG-
+Boost is then fit with a grid-search process spanning dif-
+ferent n_estimators (50, 100), max_depth (6, 10),
+learning_rate (0.1, 0.01), subsample (1.0, 0.8), and
+colsample_bytree (1.0, 0.8). The best parameter set is
+refit on the entire training portion, yielding a final Stage-1
+model. During inference, if a flow is predicted as Normal, the
+pipeline concludes immediately; if predicted as DDoS, the
+flow proceeds to Stage 2.
+D. Stage 2: Five-Class Classification (Correct or Sub-
+Classify)
+Stage 2 focuses on sub-classifying any flow that Stage 1
+declares malicious. To ensure that the system can recover from
+Stage 1 false positives, Stage 2’s set of possible labels includes
+Normal plus the four subclasses of DDoS (UDP, ICMP, TCP,
+HTTP). We reapply the same numeric plus textual embeddings
+approach, scaled and dimension-reduced, but train only on
+the DDoS flows augmented with a smaller portion of Normal
+data to enable reclassification. Another search of the XGBoost
+grid identifies an optimal set of boosting hyperparameters.
+After training, the final Stage 2 model can properly label truly
+malicious flows while restoring any wrongly flagged normal
+traffic.
+E. Feature Extraction and LLM-Based Embedding
+Numeric columns include time-based statistics (flow dura-
+tions, intervals), packet sizes, TCP handshake variables (SYN
+vs. ACK counts), content lengths, etc. Missing numeric values
+are filled with zero or means to prevent irregularities.
+Separately, textual columns (e.g., http.request.method,
+mqtt.topic, tcp.srcport) are encoded via the “sentence-
+transformers” library with the all − M iniLM − L6 − v2
+model, producing a 384-dimensional embedding per column.
+Embeddings from multiple text columns are concatenated
+horizontally. The 384-dimensional vector size arises from the
+internal architecture of the all − M iniLM − L6 − v2 model,
+which was pretrained with a 384-dimensional hidden layer.
+This dimension is therefore not user-defined, but rather an
+inherent characteristic of the specific transformer design. Fi-
+nally, the numeric features and the textual embedding vectors
+are combined into a single representation. A standard scaler
+normalizes each dimension.
+F . Implementation and Evaluation
+Both stages use Python 3.9 with scikit − learn, xgboost,
+and sentence − transf ormers, running on a Linux server
+environment. We evaluate accuracy, precision, recall, F1, and
+confusion matrices for each stage on a 20% held-out test
+set. The pipeline’s overall performance is then gauged by
+chaining Stage 1’s outputs into Stage 2’s multi-class logic.
+This arrangement highlights the synergy between the features
+of the numeric domain and the LLM embeddings in the
+detection and categorization of DDoS within next-generation
+IoT networks.
+IV. E XPERIMENTAL SETUP
+This section outlines the configurations and procedures for
+training and testing the proposed pipeline. Table I summarizes
+the key steps and parameter choices.
+Dataset partitioning. After restricting the data to five
+classes and capping each class size, we randomly split into an
+2025 IEEE Global Communications Conference: Communication & Information Systems Security
+9
+Authorized licensed use limited to: Beijing Jiaotong University. Downloaded on April 21,2026 at 16:20:58 UTC from IEEE Xplore.  Restrictions apply. 
+
+--- PAGE 4 ---
+TABLE I
+EXPERIMENTAL SETUP : MAIN STEPS AND PARAMETER RANGES .
+Step Specification
+Data Source ML-EdgeIIoT-dataset; 5 classes retained (Nor-
+mal + 4 DDoS: UDP, ICMP, TCP, HTTP).
+Downsampling Max 20k Normal, 15k per DDoS sub-class;
+remove duplicates, handle missing.
+Train/Test Split 80% training, 20% testing, stratified by class.
+Textual Embeddings all-MiniLM-L6-v2 via sentence-transformers
+(384 dims per column).
+Numeric Features Flow-level metrics (content length, TCP len,
+syn/ack flags, etc.).
+Balancing SMOTE (Synthetic Minority Oversampling)
+on training folds if needed.
+Feature Selection VarianceThreshold (0.005), SelectKBest (top
+200 by ANOV A F-value).
+Stage 1 Model XGBoost grid: n estimators {50,100},
+max depth {6,10}, learning rate {0.1, 0.01},
+subsample {1.0,0.8}, colsample bytree
+{1.0,0.8}. Binary classification.
+Stage 2 Model XGBoost with same grid. Multi-class classifi-
+cation (Normal, UDP, ICMP, TCP, HTTP).
+Metrics Accuracy, precision, recall, F1-score, confu-
+sion matrix for each stage.
+80% training portion and 20% test portion while preserving
+class ratios. The training set is used for model fitting and
+cross-validation with grid searches, while the test set remains
+strictly unseen for final metrics.
+Textual column embedding. Columns such as
+http.request.method, mqtt.topic, tcp.srcport, or other short
+strings are embedded via SentenceT ransf ormer(“all −
+M iniLM − L6 − v2”), generating one 384-dimensional
+vector per textual column. If multiple columns exist, vectors
+are concatenated horizontally.
+Balancing and scaling. To mitigate skewed distributions,
+SMOTE is applied at Stage 1 training. For Stage 2, we re-
+balance only among the relevant DDoS classes plus a fraction
+of Normal traffic so that sub-classes remain relatively even. A
+standard scaler is fit on the training data and applied to both
+training and test sets.
+Classification and hyperparameter search. Both stages
+employ XGBClassifier from xgboost. An exhaustive
+grid search over a small set of hyperparameters (tree depth,
+learning rate, number of trees, subsampling) is performed with
+three-fold cross-validation. The best combination is refit on
+the entire training partition.
+Evaluation. For Stage 1, we measure the confusion matrix
+between Normal and DDoS, along with standard binary met-
+rics (accuracy, recall, precision, F1). For Stage 2, we measure
+multi-class confusion among five possible outputs (Normal,
+UDP, ICMP, TCP, HTTP), analyzing the model’s success both
+in discriminating sub-classes and in correcting any Stage 1
+mislabeling of benign traffic.
+V. R ESULTS
+We now present the pipeline’s detection and classification
+performance. In brief, the results show that Stage 1 can ideally
+separate Normal from DDoS. At the same time, Stage 2
+TABLE II
+CONFUSION MATRIX FOR STAGE 1 (N ORMAL VS . DD OS) ON THE TEST
+PARTITION . THE PIPELINE ACHIEVES PERFECT ACCURACY FOR THIS
+DATASET.
+Predicted Normal Predicted DDoS
+True Normal 3978 0
+True DDoS 0 9680
+achieves near-perfect accuracy in fine-grained labeling of
+malicious flows or restoring Normal if Stage 1 flagged them
+incorrectly.
+A. Stage 1 Results: Normal vs. DDoS
+Table II and Figure 2 summarize Stage 1’s binary clas-
+sification. On a 20% test set, the pipeline achieved 100%
+accuracy: 3978 Normal samples were identified as Normal,
+and 9680 DDoS samples were flagged as DDoS. Furthermore,
+Figure 2 depicts the binary confusion matrix for Stage 1,
+which separates Normal from DDoS traffic. The perfect split
+here highlights the effectiveness of our combined numeric
+and LLM-based textual features on this curated dataset,
+where malicious vs. benign samples exhibit clear distinctions.
+These results set the stage for the second classification phase
+(Stage 2), where flows identified as DDoS are further sub-
+classified or—if Stage 1 erred—restored to Normal.
+Fig. 2. Stage-1 confusion matrix (Normal vs. DDoS) illustrating a perfect
+split between benign and malicious flows.
+Although 100% performance is exceptionally high, it aligns
+with prior observations that specific IoT/IIoT datasets contain
+easily distinguishable numeric and textual patterns. Embed-
+ding textual protocol fields likely contributed to the pipeline’s
+ability to detect subtle anomalies among DDoS flows.
+B. Stage 2 Results: Five-Class Classification (Normal, UDP ,
+ICMP , TCP , HTTP)
+For the second stage, we incorporate all malicious flows
+plus an allowance for Normal so that the final sub-
+classes number five: Normal, DDoS_UDP, DDoS_ICMP,
+2025 IEEE Global Communications Conference: Communication & Information Systems Security
+10
+Authorized licensed use limited to: Beijing Jiaotong University. Downloaded on April 21,2026 at 16:20:58 UTC from IEEE Xplore.  Restrictions apply. 
+
+--- PAGE 5 ---
+DDoS_TCP, and DDoS_HTTP. Table III lists the confusion
+matrix on the test set restricted to DDoS-labeled flows, with
+the possibility of outputting Normal if Stage 1 had misjudged.
+Table III shows the confusion matrix for Stage 2’s five-class
+classification (Normal, UDP, ICMP, TCP, and HTTP). Each
+row corresponds to the true class of malicious samples flagged
+by Stage 1, while the columns represent predicted labels.
+Notably, the “Normal” column allows Stage 2 to correct false
+positives if Stage 1 was overly strict. The sparse off-diagonal
+entries indicate that each DDoS variant shares few confusing
+characteristics with the others, reflecting how numeric flow
+metrics plus embedded textual protocol fields (e.g., HTTP
+methods) help the model accurately differentiate among UDP,
+ICMP, TCP, and HTTP-based DDoS subtypes.
+TABLE III
+CONFUSION MATRIX FOR STAGE 2’S FIVE -CLASS OUTPUT . T RUE LABELS
+ARE FROM MALICIOUS FLOWS ONLY , BUT THE PREDICTED LABEL CAN
+ALSO BE NORMAL TO CORRECT FALSE POSITIVES FROM STAGE 1.
+Predicted
+True Normal UDP ICMP TCP HTTP
+UDP 0 2895 5 0 0
+ICMP 0 4 2814 0 0
+TCP 0 0 0 2050 0
+HTTP 0 0 0 0 2112
+In practice, no test sample in the malicious portion is
+predicted as Normal. This indicates that Stage 1 introduced
+no false positives in this dataset. Among the actual DDoS
+sub-classes, the overall accuracy of Stage 2 is 99.91%. For
+instance, UDP had 2900 test samples, only five misclassified as
+ICMP, and the TCP/HTTP classes are recognized with 100%
+fidelity. Figure 3 and Table IV show these performance metrics
+in more detail.
+Fig. 3. Confusion matrix for Stage 2 multi-class labeling. Each row sums to
+the total for that DDoS sub-class. Misclassifications mainly occur between
+UDP and ICMP, with five or fewer errors per class.
+End-to-End Pipeline. Chaining Stage 1 and Stage 2 yields a
+final five-class decision for each flow. Because Stage 1 in this
+experiment did not misclassify any normal traffic, Stage 2
+TABLE IV
+STAGE-2 CLASSIFICATION METRICS (PRECISION , RECALL , F1) ACROSS
+THE FIVE CLASSES : NORMAL , UDP, ICMP, TCP, HTTP. T HE PIPELINE
+OBTAINS NEAR -PERFECT PERFORMANCE .
+Label Precision Recall F1-score Support
+Normal 1.0000 — — 0 (no actual normal in test subset)
+UDP 0.9986 0.9983 0.9984 2900
+ICMP 0.9982 0.9986 0.9984 2818
+TCP 1.0000 1.0000 1.0000 2050
+HTTP 1.0000 1.0000 1.0000 2112
+Overall Accuracy 0.9991
+never needed to re-label a false positive back to Normal.
+Hence, the pipeline demonstrates a perfect normal detection
+rate in Stage 1 and a near-perfect sub-classification in Stage 2.
+C. Discussion of Overall Performance
+Although 100% accuracy in Stage 1 might appear ex-
+traordinary for real-world applications, such performance is
+not inconceivable for certain curated IoT datasets where
+numeric and textual differences between Normal and DDoS
+are stark. The synergy between numeric domain fea-
+tures (like tcp.connection.syn, tcp.flags.ack,
+syn_ack_ratio) and textual embeddings (like suspicious
+HTTP methods) plays a critical role in achieving this separa-
+tion. Once samples are flagged as malicious, the second stage
+attains high fidelity in labeling each DDoS sub-class, exem-
+plifying the potential of LLM-based embeddings in IoT/edge
+network security.
+VI. D ISCUSSION
+The presented results highlight the advantages of introduc-
+ing textual embeddings from a large language model into
+the conventional numeric feature space for DDoS detection.
+This discussion addresses the significance of these findings,
+potential limitations, and possible avenues for future research.
+Significance of LLM embeddings. Unlike purely numeric
+approaches, which rely on counts, rates, and statistical anoma-
+lies in packet flows, the approach captures textual protocol
+data here. In IoT/IIoT settings, a wide range of application
+protocols (HTTP, MQTT, AMQP, CoAP) often include se-
+mantic strings that attackers can abuse. By converting these
+strings to dense embeddings, the model acquires the capacity
+to detect unusual usage or command sequences that do not
+necessarily manifest as straightforward numeric outliers.
+Pipeline structure and transferability. The two-stage
+pipeline is flexible, allowing Stage 1 to filter out normal
+traffic while Stage 2 focuses on sub-classifying or correcting
+misclassified flows. This structure extends naturally to new
+IoT or 5G/6G network contexts and can incorporate additional
+sub-classes if the dataset is expanded. The entire proce-
+dure—embedding, balancing, scaling, dimension reduction,
+and boosted decision trees—can be ported to other intrusion
+detection scenarios with minimal changes.
+Dataset limitations and perfect accuracy concerns.
+While the pipeline’s 100% separation of normal from ma-
+licious flows is consistent with the curated dataset used,
+2025 IEEE Global Communications Conference: Communication & Information Systems Security
+11
+Authorized licensed use limited to: Beijing Jiaotong University. Downloaded on April 21,2026 at 16:20:58 UTC from IEEE Xplore.  Restrictions apply. 
+
+--- PAGE 6 ---
+real operational environments might exhibit more overlap
+between benign and suspicious usage. Additional re-training,
+online adaptation, or a deeper textual embedding model might
+be required to handle novel attack patterns or polymorphic
+behaviors. Furthermore, embedding overhead may become a
+bottleneck in high-throughput or real-time detection unless
+partial embeddings or caching methods are implemented.
+We acknowledge that our observed 100% detection rate for
+Stage 1 arises in part from the relatively clean separation
+between benign and malicious samples in the chosen, cu-
+rated dataset. In a large-scale, real-world environment, subtle
+overlaps or “gray” behaviors are more likely, potentially
+reducing the practical accuracy. Moreover, simpler statistical
+approaches (e.g., [20]) can also yield high detection rates
+but often lack application-layer insight or the ability to sub-
+classify different DDoS variants.
+Our intent here is to highlight how numeric and textual em-
+beddings can complement one another for multi-class DDoS
+detection, rather than to claim a universally perfect solution
+for all deployment scenarios. Possible future efforts include
+fine-tuning the LLM specifically for IoT protocol patterns,
+exploring zero-day detection where certain textual patterns are
+unseen at training, or coupling the pipeline with automated
+response actions. Another research thread might pursue in-
+terpretability, explaining which numeric or embedded textual
+features contributed most to each classification.
+VII. C ONCLUSIONS
+This paper presents a two-stage DDoS detection pipeline for
+IoT/IIoT networks, blending numeric flow metrics with textual
+embeddings from an LLM. Tested on the ML-EdgeIIoT
+dataset, it achieved 100% accuracy in identifying normal
+versus malicious traffic and 99.91% in detecting malicious
+subclasses. The approach incorporates textual data, enhancing
+detection capabilities at the application layer and allowing cor-
+rection of false positives while precisely classifying malicious
+flows. Future efforts will aim to improve scalability, inter-
+pretability, domain-specific tuning, and real-time adaptation
+to evolving threats.
+REFERENCES
+[1] H. Edquist et al., “The internet of things and economic growth in a panel
+of countries,” Economics of Innovation and New Technology, vol. 30,
+no. 3, pp. 262–283, 2021.
+[2] W. H. Hassan et al., “Current research on internet of things (iot)
+security: A survey,” Computer networks, vol. 148, pp. 283–294, 2019.
+[3] A. C. Naik et al., “Enhancing IoT security: A comprehensive explo-
+ration of privacy, security measures, and advanced routing solutions,”
+Computer Networks, p. 111045, 2025.
+[4] A. Alfatemi et al., “Identifying distributed denial of service attacks
+through multi-model deep learning fusion and combinatorial analysis,”
+Journal of Network and Systems Management, vol. 33, no. 1, p. 8, 2025.
+[5] A. Alfatemi et al., “Precision DDoS detection through gaussian noise-
+augmented neural networks,” in 2024 15th International Conference on
+Network of the Future (NoF), pp. 178–185, IEEE, 2024.
+[6] A. Alfatemi, M. Rahouti, R. Amin, S. ALJamal, K. Xiong, and Y . Xin,
+“Advancing DDoS attack detection: A synergistic approach using deep
+residual neural networks and synthetic oversampling,” arXiv preprint
+arXiv:2401.03116, 2024.
+[7] M. Wichtlhuber et al., “IXP scrubber: learning from blackholing traffic
+for ml-driven ddos detection at scale,” in Proceedings of the ACM
+SIGCOMM 2022 Conference, pp. 707–722, 2022.
+[8] M. Y . M. Haq et al., “Victimization in DDoS attacks: The role of
+popularity and industry sector,” Computers & Security, 2024.
+[9] V . ˇSafran et al., “Multilingual framework for risk assessment and
+symptom tracking (mrast),” Sensors, vol. 24, no. 4, p. 1101, 2024.
+[10] Y . Li et al., “Ids-agent: An LLM agent for explainable intrusion
+detection in IoT networks,” in NeurIPS 2024 Workshop on Open-World
+Agents, 2024.
+[11] J. Zhang et al., “When llms meet cybersecurity: A systematic literature
+review,”arXiv preprint arXiv:2405.03644, 2024.
+[12] L. Wang et al., “Improving text embeddings with large language
+models,” arXiv preprint arXiv:2401.00368, 2023.
+[13] O. Polat et al., “Multi-stage learning framework using convolutional
+neural network and decision tree-based classification for detection of
+DDoS pandemic attacks in SDN-based SCADA systems,” Sensors,
+vol. 24, no. 3, p. 1040, 2024.
+[14] M. A. Ferrag et al., “Edge-iiotset: A new comprehensive realistic
+cyber security dataset of IoT and IIoT applications for centralized and
+federated learning,” IEEE Access, vol. 10, pp. 40281–40306, 2022.
+[15] P. Kumari and A. K. Jain, “A comprehensive study of DDoS attacks
+over iot network and their countermeasures,” Computers & Security,
+vol. 127, p. 103096, 2023.
+[16] G. Somani et al., “DDoS attacks in cloud computing: Collateral damage
+to non-targets,” Computer Networks, vol. 109, pp. 157–171, 2016.
+[17] A. A. Alahmadi et al., “Ddos attack detection in IoT-based networks
+using machine learning models: a survey and research directions,”
+Electronics, vol. 12, no. 14, p. 3103, 2023.
+[18] A. Petukhova et al., “Text clustering with LLM embeddings,” arXiv
+preprint arXiv:2403.15112, 2024.
+[19] S. Karnani et al., “A comprehensive survey on low-rate and high-rate
+DDoS defense approaches in sdn: taxonomy, research challenges, and
+opportunities,” Multimedia Tools and Applications, vol. 83, no. 12,
+pp. 35253–35306, 2024.
+[20] A. Fausto et al., “Reduction of the delays within an intrusion detection
+system (IDS) based on software defined networking (SDN),” IEEE
+Access, vol. 10, pp. 109850–109862, 2022.
+[21] N. V . Chawla et al., “SMOTE: synthetic minority over-sampling tech-
+nique,” Journal of artificial intelligence research, vol. 16, pp. 321–357,
+2002.
+2025 IEEE Global Communications Conference: Communication & Information Systems Security
+12
+Authorized licensed use limited to: Beijing Jiaotong University. Downloaded on April 21,2026 at 16:20:58 UTC from IEEE Xplore.  Restrictions apply. 

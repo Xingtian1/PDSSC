@@ -1,0 +1,377 @@
+--- PAGE 1 ---
+WIRELESS DEEP SPEECH SEMANTIC TRANSMISSION
+Zixuan Xiao ⋆, Shengshi Yao⋆, Jincheng Dai ⋆, Sixian Wang⋆, Kai Niu ⋆†, Ping Zhang ⋆
+⋆ Beijing University of Posts and Telecommunications, Beijing, 100876, China
+† Peng Cheng Laboratory, Shenzhen, 518067, China
+Email: daijincheng@bupt.edu.cn
+ABSTRACT
+In this paper, we propose a new class of high-efﬁciency semantic
+coded transmission methods to realize end-to-end speech transmis-
+sion over wireless channels. We name the whole system as Deep
+Speech Semantic Transmission (DSST) . Speciﬁcally, we introduce a
+nonlinear transform to map the speech source to semantic latent s-
+pace and feed semantic features into source-channel encoder to gen-
+erate the channel-input sequence. Guided by the variational model-
+ing idea, we set an entropy model on the latent space to estimate the
+importance diversity among semantic feature embeddings. Accord-
+ingly, these semantic features of different importance can be rea-
+sonably allocated with different coding rates, which maximizes the
+system coding gain. Furthermore, we introduce a channel signal-to-
+noise ratio (SNR) adaptation mechanism such that a single model
+can be applied over various channel states. The end-to-end opti-
+mization of our model leads to a ﬂexible rate-distortion (RD) trade-
+off, supporting an adaptive rate wireless speech semantic transmis-
+sion. Experimental results verify that our DSST system clearly out-
+performs current engineered speech transmission systems on both
+objective and subjective metrics. Compared with existing neural
+speech semantic transmission methods, our model saves up to 75 %
+of channel bandwidth costs when achieving the same quality. Audio
+samples are available at https://ximoo123.github.io/DSST.
+Index Terms — Semantic communications, speech transmis-
+sion, nonlinear transform source-channel coding, RD trade-off.
+1. INTRODUCTION
+State-of-the-art (SOTA) engineered speech transmission methods
+over the wireless channel can usually be separated into two steps:
+source coding and channel coding [1]. Source coding performs a
+linear transform on the waveform, which removes redundancy and
+decorrelate, and channel coding provides error-correction against
+imperfect wireless channels. However, the optimality of separation-
+based schemes holds only in the asymptotic limit of inﬁnite source
+and channel blocklengths, which is impossible in actual communica-
+tion scenarios. Moreover, the cliff effect exists in separation-based
+schemes where the performance breaks down when the channel
+capacity goes below the communication rate.
+This work was supported in part by the National Natural Science
+Foundation of China under Grant 62293481, Grant 92067202, Grant
+62001049, and Grant 62071058, Beijing Natural Science Foundation un-
+der Grant 4222012, BUPT Excellent Ph.D. Students Foundation under Grant
+CX2022146. Corresponding author: Jincheng Dai, Kai Niu.
+Hence, it is very time to bridge source and channel coding to
+boost end-to-end communications performance. Conventional joint
+source-channel coding (JSCC) methods are based on statistical prob-
+abilities while ignoring source semantic aspects. With the develop-
+ment of deep learning, a growing number of researchers are devoted
+to using neural network to extract semantic features and realize JSC-
+C for efﬁcient semantic transmission [2–4]. In this paper, we focus
+on speech transmission. Recent study DeepSC-S [5] employs the
+same method to accurately transmit speech waveform, showing the
+potential of joint coding schemes. However, they encode pulse code
+modulation (PCM) signals directly without removing the decorre-
+late between samples as in SOTA schemes, which leads to a colossal
+waste of bandwidth.
+To address these shortcomings, we aim to integrate the ad-
+vantages of classical transfer schemes and deep learning to realize
+a high-efﬁciency end-to-end deep speech semantic transmission
+(DSST). Speciﬁcally, we ﬁrst introduce a nonlinear transform to
+extract waveform semantic features [6–8]. Then, we develop the
+Transformer architecture [9] to encode semantic features to the
+channel input symbols directly. Particularly, to get a higher coding
+gain, we estimate the importance of semantic features by a learn-
+able entropy model and feed the value into the encoder to guide the
+assignment of coding rate more reasonably accordingly. The whole
+system is formulated as an optimization problem aiming to mini-
+mize the end-to-end rate-distortion (RD) performance. It achieves
+the highest possible performance at any given transmission rate.
+Finally, we verify the performance of DSST across various chan-
+nel conditions. Compared with the widely used classical separate
+schemes adaptive multi-rate wideband (AMR-WB) + 5G LDPC, O-
+pus + 5G LDPC [10–12], our model gets a noticeable improvement
+in both objective scores and subjective scores across almost band-
+width consumptions and signal-to-noise ratios (SNRs) under addi-
+tive white gaussian noise (AWGN) channel and COST2100 fading
+channel [13]. In addition, our model outperforms the existing neural
+method DeepSC-S in these two evaluation metrics. With a similar
+objective score, our model saves up 75% of the bandwidth cost.
+2. OUR PROPOSED DSST SYSTEM
+2.1. Architecture
+Our network architecture, shown in Fig. 1, comprises a semantic
+transform network, a prior codec, and a Deep JSCC codec. Giv-
+en a speech sample x in time domain, it is ﬁrst transformed into
+semantic latent representation y in the semantic feature domain by
+a DNN-based nonlinear analysis transform ga. Then, the latent fea-
+ture y is fed into both prior encoderha and JSCC encoderfe. On the
+ICASSP 2023 - 2023 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP) | 978-1-7281-6327-7/23/$31.00 ©2023 IEEE | DOI: 10.1109/ICASSP49357.2023.10094680
+Authorized licensed use limited to: Beijing Jiaotong University. Downloaded on January 21,2026 at 06:23:47 UTC from IEEE Xplore.  Restrictions apply. 
+--- PAGE 2 ---
+Wireless 
+Channel 
+Wireless 
+Channel 
+Side Information Transmission Link 
+(Optional) 
+Semantic Analysis 
+Transform 
+Semantic Analysis 
+Transform Prior Encoder Prior Encoder 
+Prior Decoder Prior Decoder 
+Entropy Model Entropy Model 
+JSCC Encoder JSCC Encoder 
+Wireless 
+Channel 
+Wireless 
+Channel 
+JSCC Decoder JSCC Decoder 
+Prior Decoder Prior Decoder Semantic Synthesis 
+Transform 
+Semantic Synthesis 
+Transform 
+Fig. 1. The architecture of DSST.
+one hand,ha captures the temporal dependencies of y and utilizes a
+learnable entropy model to characterize the semantic importance of
+rate allocation. On the other hand,fe encodes y as channel-input se-
+quence s for transmission over the wireless channel directly and the
+received sequence is ˆs. In this paper, we consider AWGN channel
+and COST2100 wireless fading channel, such that ˆs can be written
+as ˆs =W (s|h) = h⊙ s + n, where h is the CSI vector,⊙ is the
+element-wise product and n denotes the noise vector, it is indepen-
+dently sampled from Gaussian distribution, i.e. n∼CN (0,σ 2
+nI).
+The structure of the receiver is with a mirrored architecture. As illus-
+trated in Fig. 1,fd is the Deep JSCC decoder which aims to recover
+latent representation ˆy,gs is semantic synthesis transform for recon-
+structing source signals ˆx andhs is prior decoder. Hence, the total
+link of the DSST system is formulated as follows:
+x
+ga(·)
+−−−→y
+fe(·)
+−−−→s
+W (·|h)
+−−−−→ˆs
+fd(·)
+−−−→ˆy
+gs(·)
+−−−→ˆx
+with the latent prior y
+ha(·)
+−−−→z
+hs(·)
+−−−→{µ, σ}.
+(1)
+Moreover, we design an optional transmission according to the actu-
+al channel situation. When the channel capacity is large enough, we
+transmit the side informationz to the receiver by reliable digital cod-
+ing schemes as a hyperprior to acquire higher decoding gain. When
+there is a shortage of channel capacity,z will not be transmitted, and
+the system performance will be slightly degraded as a result.
+2.2. Variational Modeling and Source-Channel Coding
+In our intuition, the speech signal at the silent time almost carries
+few information. Therefore, signals with zero magnitudes should be
+allocated less channel bandwidth and vice versa. If we assign the
+same coding rate for semantic features of all frames, the coding ef-
+ﬁciency cannot be maximized. To tackle this problem, we design an
+entropy model to accurately estimate the distribution of y such that
+it evaluates the importance of different semantic features. Moreover,
+we try to make the Deep JSCC encoder able to aware of the seman-
+tic characteristics of the source and reasonably allocate coding rate
+according to the semantic importance.
+Our entropy model is illustrated in the middle part of Fig. 1. Fol-
+lowing the work of [8], the semantic featurey is variational modeled
+as a multivariate Gaussian with the mean µ and the standard devia-
+tion σ. Thus the true posterior distribution of y can be modeled by
+a fully factorized density model as:
+py|z(y|z) =
+∏
+i
+(
+N (yi|µi,σ i)∗U (−1
+2, 1
+2)
+)
+(yi)
+with (µ, σ) =hs(z),
+(2)
+where∗ is convolutional operation,U denotes a uniform distribution,
+it utilized to match the prior to the marginal such that the estimated
+entropy− logpy|z(y|z) is non-negative. During optimizing, the
+actual distributionqy|z created byha will gradually approximate the
+true distributionpy|z, hence the entropy model estimates distribution
+of y accurately. The entropy value of each frame− logpyi|z(yi|z)
+will be fed into JSCC encoder and guides the allocation of coding
+rate accordingly. If the entropy model indicates yi of high entropy,
+the encoder will allocate more resources to transmit it. The total
+channel bandwidth costK for transmitting y can be written as:
+K =
+B∑
+i=1
+¯kyi =
+B∑
+i=1
+Q(kyi) =
+B∑
+i=1
+Q(−ηy logpyi|z(yi|z)), (3)
+whereB is the number of frames of the speech signal, ηy is a hy-
+perparameter to balance channel bandwidth cost from the estimated
+entropy, ¯kyi is the bandwidth consumption of frame i,Q denotes a
+scalar quantization whose range includesn integers.
+2.3. Optimization Goal
+The optimization goal of the DSST system is to attain an RD trade-
+off between channel bandwidth cost and speech reconstruction qual-
+ity. It is proven by Ball ´ ethat it is more reasonable to model the
+whole model as a variational autoencoder [8], such that minimiz-
+ing the KL divergence is equivalent to optimizing the model for RD
+performance. Hence, the goal of inference model is creating a vari-
+ational densityqˆs,˜z|x to approximate the true posterior pˆs,˜z|x. The
+RD function can be approximated as
+LRD = Ex∼pxDKL[qˆs,˜z|x||pˆs,˜z|x]⇔ Ex∼px Eˆs,˜z∼qˆs,˜z|x
+[(− logp˜z(˜z)− logpˆs|˜z(ˆs|˜z)) + Ey∼py|ˆs,˜z[logpx|y(x|y)]].
+(4)
+The ﬁrst term is seen to be identical to the cross entropy be-
+tween the marginal q˜z(˜z) = Ex∼px Eˆs∼qˆs|x[qˆs,˜z|x(ˆs, ˜z|x)] and
+the priorp˜z(˜z), it represents the cost of encoding the side informa-
+tion assuming p˜z as the entropy model. Note p˜z(˜z) is modeled as
+non-parametric fully factorized density [8] as
+p ˜z(˜z) =
+∏
+i
+(
+pzi|ψ(i)(ψ(i))∗U (−1
+2, 1
+2)
+)
+, (5)
+where ψ(i) encapsulates all the parameters of pzi|ψ(i). In addition,
+to allow optimization via gradient descent during model training
+phase [7], z is added an uniform offset o instead of scalar quanti-
+zation ¯z =⌊z⌉, i.e. ˜z = z + o withoi∼U
+(
+− 1
+2, 1
+2
+)
+.
+The second term is similar to the ﬁrst term, representing the cost
+of encoding ˆs and denoting the transmission rate of the speech sig-
+nal. In practice, we utilize the intermediate proxy variable y to de-
+rivepˆs|˜z. During the transmission process, y is directly fed into the
+JSCC encoder and channel without quantization. The process can be
+described as
+pˆs|˜z =W (ps|˜z|h) =W (fe(py|˜z)|h). (6)
+Authorized licensed use limited to: Beijing Jiaotong University. Downloaded on January 21,2026 at 06:23:47 UTC from IEEE Xplore.  Restrictions apply. 
+--- PAGE 3 ---
+Split 
+... 
+FC FC 
+FC 
+FC FC 
+SNR 
+Token 
+... Rate 
+Tokens 
+Transformer Block 
+... 
+... 
+... 
+... 
+PowerNorm 
+FC FC ... FC FC FC FC Auxiliary FC 
+Heads 
+Fig. 2 . The architecture of the adaptive rate Deep JSCC encoder.
+The structure of Deep JSCC decoder is with a mirrored architecture.
+Thus, the densitypˆs|˜z can be approximated tops|˜z and transformed
+to py|˜z. Similarly, z is added an uniform offset instead of scalar
+quantization, the transmission rate is constrained proportionally to
+− logPy|z(y|z).
+The third term represents the log-likelihood of recovering x.
+Based on the above analysis, the RD function can be simpliﬁed to
+LRD = Ex∼px[−ηy logpy|z(y|z)−ηz logp˜z(˜z) +λd(x, ˆx)],
+(7)
+where the Lagrange multiplier λ determines the tradeoff between
+the wireless transmission total bandwidth costR and the end-to-end
+distortionD.ηy andηz are two hyperparameters to balance channel
+bandwidth consumption of y and z.d(·,·) is the distortion between
+the original signals and reconstructed signals.
+In our paper, we employ the distortion function d both in time
+domains and frequency domains. Firstly, we utilize mean square er-
+ror (MSE) between the original signals x and reconstructed signals
+ˆx to evaluate the reconstructed error in time domain. Then we com-
+pute MFCCs [14] for the source signal and reconstructed signal and
+employ l2 distance between MFCC vectors in frequency domains to
+pursue better human perceptual quality [15]. Considering the spec-
+tral tilt phenomenon [16], if we use MSE as a loss function in fre-
+quency domains, the relative error of high-frequencies will be more
+signiﬁcant, leading to the loss of high frequency information. Hence,
+we ﬁnally apply normalized mean squared error (NMSE) as the loss
+function, which helps the model be optimized toward reconstructing
+high frequencies and gives speech higher human perceptual quality.
+2.4. Modular Implementation Details
+In this part, we will share some details of DSST. We take speech sig-
+nals as an example. After preprocessing operations, the input frame
+x is modeled as a vector x∈ RB×C×L, where B is the number
+of frames, C is the number of sound channels, and L is the frame
+length.
+(1) Semantic Analysis and Synthesis Transform ga,g s: The se-
+mantic analysis and synthesis transform are used a similar structure
+as the Kankanahalli network [17] , it contains multilayer 1D con-
+volutional blocks and residual networks to extract the semantic fea-
+tures of the waveform efﬁciently. The latent feature can be written as
+y∈ RB×M× L
+4 after twice downsampling,M is channel dimension.
+(2) Prior Codec ha,h s: The structure of ha is consisted of 3
+convolution blocks withN channels. The ﬁrst block contains a con-
+volutional layers with kernel size 3 and a ReLU activation functions.
+Other blocks are composed of a down-sampling layer consisting in
+a strided convolution, with kernel size 5 and stride 2, followed by
+a ReLU activation functions. hs mirrorsha. The hyperprior mod-
+el summarizes the distribution of means and standard deviation in
+z∈ RB×N× L
+16 . It effectively captures the semantic temporal con-
+nections of the speech waveform.
+(3) Adaptive rate Deep JSCC Codec fe,f d: The architecture
+of Deep JSCC codec is illustrated in Fig. 2. The encoder consists
+ofNe Transformer blocks and FC layers to implement rate alloca-
+tion. Speciﬁcally, y is ﬁrstly separated into patch embedding se-
+quence{y1,y 2,...,y B}. To adaptively mapyi to a ¯kyi-dimensional
+channel-input vector si, we develop a rate token vector set R =
+{ry1,r y2...ryn} to represent rate information and quantization val-
+ue setV =
+{¯ky1, ¯ky2...¯kyn
+}
+to denote output dimension. By this
+approach, each yi is merged with its corresponding rate token ryi
+according to the entropy− logPyi|z(yi|z) and is fed into the Trans-
+former block and FC layer to transform into a ¯kyi-dimensional vec-
+tor. In particular, we employ a group of FC layers with different
+output dimensions, it guided by the rate tokenryi accordingly.
+Moreover, we perform SNR adaptation in this process. This pa-
+per assumes that the transmitter and receiver can receive the SNR
+feedback information for better performance. As illustrated in Fig.
+2, each patchyi is concatenated with SNR tokenC∈ RB, such that
+the Transformer can learn the SNR information. Hence, the single
+model can perform at least as well as the models trained for each
+SNR individually ﬁnally when trained under random SNRs.
+(4) Optional Transmission Link : If we transmit z to obtain the
+decoding gain, we will quantify z ﬁrst and perform entropy coding
+and channel coding on it, which ensure an reliable transmission. At
+the receiver, the prior decoder reconstructs side information µ, σ,
+and feeds it into the Deep JSCC decoder.
+3. EXPERIMENTS
+In this section, we provide illustrative numerical results to evaluate
+the quality of speech waveform transmission. Objective quality met-
+rics and a result of a subjective listening test are presented to validate
+our designed approach.
+3.1. Experimental Setups and Evaluation Metrics
+The waveform is sampled at 16kHz from TIMIT dataset [18]. Dur-
+ing total training process, we use Adam optimizer [19] with B =
+100 frames in a single batch andL = 512 samples in a frame.
+To evaluate our model, we use an objective evaluation metric
+and conduct a subjective experiment as well. Concerning objective
+quality evaluation, we report perceptual evaluation of speech quality
+(PESQ) [20] scores to reﬂect the reconstructed speech quality. Fur-
+thermore, we implement MUSHRA subjective test [21] to evaluate
+audio quality by human raters. We randomly select ten reconstructed
+waveform signals from the test dataset. To demonstrate the superi-
+ority of our model, the comparison schemes include the traditional
+transmission methods: AMR-WB + 5G LDPC and Opus + 5G LD-
+PC, a standard neural JSCC model DeepSC-S. For traditional sepa-
+ration methods, we choose different coding and modulation schemes
+according to the adaptive modulation coding (AMC) principle [22].
+3.2. PESQ Performance
+Fig. 3(a) shows the rate-quality results among various transmis-
+sion methods over the AWGN channel with channel SNR at 6dB.
+The proposed DSST method outperforms traditional AMR-WB +
+5G LDPC and Opus + 5G LDPC under all bandwidth consumption
+situations. It is mainly because our scheme estimates the distribution
+of speech source accurately, which mitigates the mismatch between
+Authorized licensed use limited to: Beijing Jiaotong University. Downloaded on January 21,2026 at 06:23:47 UTC from IEEE Xplore.  Restrictions apply. 

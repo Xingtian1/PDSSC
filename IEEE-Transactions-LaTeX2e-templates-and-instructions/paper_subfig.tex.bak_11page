@@ -1,0 +1,543 @@
+\documentclass[lettersize,journal]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{float}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{url}
+\usepackage{stfloats}
+\usepackage{enumitem}
+
+\setlist{nosep,leftmargin=*}
+
+\setlength{\textfloatsep}{8pt plus 2pt minus 2pt}
+\setlength{\dbltextfloatsep}{8pt plus 2pt minus 2pt}
+\setlength{\floatsep}{6pt plus 2pt minus 2pt}
+\setlength{\intextsep}{6pt plus 2pt minus 2pt}
+\setlength{\abovedisplayskip}{6pt plus 2pt minus 2pt}
+\setlength{\belowdisplayskip}{6pt plus 2pt minus 2pt}
+\setlength{\abovedisplayshortskip}{4pt plus 2pt minus 2pt}
+\setlength{\belowdisplayshortskip}{4pt plus 2pt minus 2pt}
+% Reduce vertical spacing around section headings (IEEEtran journal default is large)
+\makeatletter
+\renewcommand{\section}{\@startsection{section}{1}{\z@}{1.5ex plus 1ex minus 0.5ex}{0.7ex plus 1ex minus 0ex}{\normalfont\normalsize\centering\scshape}}
+\renewcommand{\subsection}{\@startsection{subsection}{2}{\z@}{2.0ex plus 1ex minus 0.5ex}{0.7ex plus .5ex minus 0ex}{\normalfont\normalsize\itshape}}
+\makeatother
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{Progressive Digital Semantic Speech Communication for Packet-Loss Channels}
+
+\author{Hao~Cheng,~\IEEEmembership{Student~Member,~IEEE,}
+        Wei~Chen,~\IEEEmembership{Member,~IEEE,}
+        Bo~Ai,~\IEEEmembership{Fellow,~IEEE,}
+        Xiongkuo~Min,~\IEEEmembership{Member,~IEEE,}
+        Guangtao~Zhai,~\IEEEmembership{Senior~Member,~IEEE,} and
+        Wenwu~Wang,~\IEEEmembership{Fellow,~IEEE}%
+\thanks{H. Cheng, W. Chen, and B. Ai are with the School of Electronic and Information Engineering, Beijing Jiaotong University, Beijing 100044, China (e-mail: \{24125150, weich, boai\}@bjtu.edu.cn).}%
+\thanks{X. Min and G. Zhai are with the Institute of Image Communication and Network Engineering, Department of Electronic Engineering, Shanghai Jiao Tong University, Shanghai 200240, China (e-mail: \{minxiongkuo, zhaiguangtao\}@sjtu.edu.cn).}%
+\thanks{W. Wang is with the School of Computer Science and Electronic Engineering, University of Surrey, Guildford GU2 7XH, U.K., and also with the Surrey Institute for People Centred AI (e-mail: W.Wang@surrey.ac.uk).}%
+\thanks{Manuscript received Month xx, 2026; revised Month xx, 2026.}%
+\thanks{Corresponding author: Bo Ai.}}
+
+% The paper headers
+\markboth{IEEE TRANSACTIONS ON WIRELESS COMMUNICATIONS,~Vol.~XX, No.~XX, Month~2026}%
+{Cheng \MakeLowercase{\textit{et al.}}: Progressive Digital Semantic Speech Communication for Packet-Loss Channels}
+
+\maketitle
+
+\begin{abstract}
+Non-terrestrial networks (NTNs), together with their integration with terrestrial infrastructure, support speech services in remote, offshore, moving-platform, and emergency-response scenarios, where bandwidth is scarce, packet loss is prevalent, and real-time operation is required. In this regime, conventional speech codecs become inefficient at low bitrates, while existing speech semantic communication methods still struggle to support low-bitrate transmission, packet-loss robustness, and low-latency deployment within one framework. To address this problem, we propose Progressive Digital Semantic Speech Communication (PDSSC). PDSSC uses a layered discrete representation that transmits semantic content first and progressively supplements higher-layer detail, thereby supporting progressive transmission under low-bitrate constraints. Our method treats bitrate reduction and packet loss as a speaker-related recovery problem, addressed by a low-step generative recovery model leveraging same-speaker side information for effective low-cost recovery. A lightweight bitrate controller is also introduced for flexible deployment. Experimental results on LibriSpeech show that the proposed method achieves better perceptual quality than Opus while reducing transmission bitrate by 87.5\%, and exhibits stronger robustness under packet-loss conditions. A complexity and latency analysis further confirms that the proposed framework remains practical for real-time deployment.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Semantic communication, low-bitrate speech transmission, progressive transmission, packet-loss recovery
+\end{IEEEkeywords}
+
+\section{Introduction}
+\IEEEPARstart{N}{on}-terrestrial networks (NTNs) and their integration with terrestrial infrastructure are widely regarded as a key enabler for extending communication services beyond conventional ground coverage and toward ubiquitous connectivity~\cite{3gpp_ntn,cheng2022sagin,ngmn_ntn}. In many NTN-enabled applications---including remote and offshore operations, maritime communications, moving platforms, and emergency response---speech remains a primary real-time service, yet the underlying links are often bandwidth limited, packet switched, and subject to frequent packet loss. These constraints make it challenging to simultaneously ensure intelligibility, naturalness, robustness, and low end-to-end latency, particularly in the ultra-low-bitrate regime.
+
+This challenge stems largely from a mismatch between link conditions and existing speech coding paradigms. Conventional speech codecs, e.g., advanced audio coding (AAC) and Opus~\cite{iso_aac,valin2012opus}, are mature and highly optimized, but they are primarily designed for faithful signal reconstruction and perceptual quality preservation. In the ultra-low-bitrate regime, they may still allocate a non-negligible portion of the rate to fine-grained acoustic details that contribute less to intelligibility, and their quality degrades further when packets are erased. Semantic speech communication provides an alternative perspective~\cite{qin2021semcom,nguyen2025survey} by prioritizing meaning- and task-relevant information, rather than treating all signal components as equally important for transmission.
+
+Recent studies have advanced semantic speech communication from several angles, yet none simultaneously meet the requirements of ultra-low bitrate, packet-loss robustness, and real-time deployment. DeepSC-style approaches~\cite{weng2020deepscs,xie2021deepsc,weng2022deepscst} and DSST~\cite{xiao2023dsst} demonstrate the promise of semantic-aware transmission, but their continuous latent representations are not well aligned with digital, packetized links. It is worth clarifying the positioning of these schemes relative to ours: JSCC-style methods transmit continuous latent representations over analog-like channels whose impairments manifest as additive noise, whereas the digital packetized links considered in this work require discretizing the source into integer symbols, with packet erasure---rather than noise---as the dominant impairment. The two families therefore operate under different channel models and robustness measures, so our quantitative comparisons focus on digital codecs and semantic schemes within the same packetized regime. To better match practical links, low-bitrate methods increasingly adopt learned discrete representations, including neural codecs such as EnCodec~\cite{defossez2023encodec} and Descript Audio Codec~\cite{kumar2023dac}, as well as RVQ-token-based digital semantic schemes~\cite{chen2025rvqgan}. While these improve digital compatibility and reconstruction quality at low rates, the transmitted tokens are typically not ordered by semantic importance, which limits further bitrate reduction and prevents progressive transmission. Meanwhile, receiver-side generative restoration methods can better infer missing information by leveraging advances in neural speech generation~\cite{vanoord2016wavenet,kong2020hifigan} and diffusion-based modeling~\cite{ho2020ddpm,popov2021gradtts}, including codec-based zero-shot generation~\cite{wang2023valle}; representative systems include LargeSC~\cite{tian2025lsm} and packet-loss-focused designs such as Glaris~\cite{han2025esc}, but they usually rely on heavier models and longer inference, making low-latency deployment challenging. Overall, achieving high intelligibility and perceptual quality at very low bitrates remains difficult~\cite{xin2024bigcodec}, and current systems provide limited support for progressive transmission.
+
+To address these gaps, we propose Progressive Digital Semantic Speech Communication (PDSSC), a digital semantic speech communication framework tailored for bandwidth-constrained, packet-switched speech links. On the transmitter side, PDSSC adopts a semantic-priority layered discrete representation: the lowest layers convey intelligibility-critical content, and additional layers progressively refine speaker traits, prosody, and other residual acoustic details. This hierarchy allows both active bitrate reduction (by truncating higher layers) and passive packet erasure to be modeled as the same phenomenon at the receiver---namely, missing high-layer speaker-related information. Motivated by many practical scenarios with relatively stable user populations, PDSSC further leverages a receiver-maintained same-speaker reference library as side information, enabling a low-step generative recovery model to restore the missing detail. Finally, a lightweight automatic bitrate controller is integrated to support flexible operation under time-varying link conditions. Experiments demonstrate that PDSSC achieves strong perceptual quality and robustness in low-bitrate and packet-loss regimes while remaining practical for real-time deployment.
+
+The main contributions are summarized as follows:
+\begin{itemize}
+\item A progressive digital semantic transmission framework for low-bitrate speech communication, built on a semantic-priority layered discrete representation in which the first layer carries intelligibility-critical content and context while the higher layers progressively encode speaker-related paralinguistic and residual acoustic detail, thereby enabling further bitrate reduction and progressive transmission within a single digital packetized system.
+\item A two-layer factor-specific distillation mechanism that explicitly drives the first RVQ layer toward a pretrained semantic teacher and the second RVQ layer toward a pretrained timbre teacher, so that layerwise semantic and speaker disentanglement emerges from the interplay between factor-specific distillation and residual quantization rather than from architectural duplication, producing a transmission-priority-ordered representation within one codec.
+\item A unified low-step generative recovery framework that leverages same-speaker side information to restore the missing high-layer detail caused by both active bitrate reduction and passive packet erasure; by starting the recovery path from an already informative incomplete latent rather than pure noise and conditioning on a mixed reference embedding together with time and bitrate, the model recovers speaker-consistent detail on top of the preserved semantic backbone in only a few inference steps, keeping recovery cost low enough for real-time operation.
+\item A lightweight channel-adaptive bitrate controller that adapts the number of transmitted layers to the estimated packet-loss rate and the available bitrate budget in real time; because the codec and recovery model are frozen after training, the end-to-end rate-distortion tradeoff is a stable surface that can be characterized once by sampling the frozen pipeline, so a small policy network suffices to select the operating bitrate without retraining the system, improving bandwidth efficiency under time-varying link conditions.
+\end{itemize}
+
+The remainder of this paper is organized as follows. Section~II presents the system model and formulates the problem. Section~III details the proposed PDSSC framework. Section~IV reports the experimental results and analysis. Section~V concludes the paper.
+
+\begin{figure*}[tb]
+\centering
+\makebox[\textwidth][c]{\includegraphics[width=0.98\textwidth]{paper_figs/fig1.png}}
+\caption{Overall architecture of the proposed PDSSC system.}
+\label{fig:system_model}
+\end{figure*}
+\section{System Model and Problem Formulation}
+This section presents the end-to-end communication model and shows that both active bitrate reduction and passive packet erasure lead to the same kind of information loss, since the components removed by layer truncation and those erased by packet loss are both dominated by higher-layer paralinguistic and residual acoustic features; both can therefore be handled by a single receiver-side recovery model.
+Fig.~\ref{fig:system_model} illustrates the end-to-end communication setting. We consider a fixed user set $\mathcal{U}=\{1,\ldots,J\}$ of $J$ users communicating over a bandwidth-limited packet-erasure link. The transmitter attaches the active user identity, and the receiver retrieves the corresponding same-speaker reference speech $x_{\mathrm{ref}}^{(j)}$ from a local speech library as side information to assist paralinguistic-detail recovery. The overall system therefore consists of (i) a transmitter that generates layered semantic tokens and packetizes them for digital transmission, (ii) a packet-erasure channel, and (iii) a receiver that reconstructs the latent representation and decodes the waveform with side-information-guided recovery. We now describe the transmitter-side layered source representation. Given an input waveform $x$, the transmitter maps it to a latent sequence
+\begin{equation}
+\mathbf{h}=E_{\phi}(x),\qquad \mathbf{h}\in\mathbb{R}^{D\times F},
+\end{equation}
+where $E_{\phi}(\cdot)$ denotes the semantic encoder and the latent spans $D$ feature dimensions over $F$ frames. To obtain a digital source representation compatible with packetized transmission, the continuous latent must be mapped to integer indices, since digital channels transmit discrete symbols rather than floating-point features; quantization into codebook indices further compresses the information to be transmitted. We therefore discretize $\mathbf{h}$ using an $N$-layer residual vector quantizer (RVQ) with codebook size $K$, yielding the layered token sequence
+\begin{equation}
+\mathbf{Z}=\mathcal{Q}(\mathbf{h})=\left[z^{(1)},z^{(2)},\ldots,z^{(N)}\right].
+\end{equation}
+where $\mathcal{Q}(\cdot)$ denotes RVQ; each $z^{(l)}\in\{0,\ldots,K-1\}^{F}$ selects codewords at layer $l$, and stacking all $N$ layers yields the discrete layered index representation $\mathbf{Z}$. The dequantized contributions from all layers are summed to form a complete latent representation, which is then decoded by the shared semantic decoder $D_{\psi}(\cdot)$ to reconstruct the waveform. At the system level, $\mathbf{Z}$ is the digital source description: the first layer carries the transmission-critical semantic content, while the later layers progressively encode speaker-related paralinguistic and residual acoustic detail. The semantic roles of different layers are detailed in Section~III.
+\par Thanks to this layered structure, bitrate adaptation is realized by controlling the number of RVQ layers to transmit, denoted $N^{\star}\in\{1,\ldots,N\}$, with the corresponding transmitted token sequence $\mathbf{Z}^{\star}_{N^{\star}}=[z^{(1)},\ldots,z^{(N^{\star})}]$. The resulting source bitrate is
+\begin{equation}
+R=N^{\star}\rho\log_2 K,
+\end{equation}
+where $R$ denotes the source bitrate, $\rho=f_s/s$ is the latent frame rate, $f_s$ is the sampling rate, and $s$ is the encoder stride. For the configuration used in this work ($f_s=16$~kHz, $s=320$, and $K=1024$), this gives $\rho=50$ frames/s and $R=0.5N^{\star}$~kbps; thus, $N^{\star}$ directly determines the operating bitrate. Prior to transmission, the selected tokens are semantically interleaved and packetized so that neighboring token positions are distributed across different packets. Since the first layer carries the transmission-critical semantic backbone, it is conveyed in a separate protected stream, so that packet erasure affects only the supplementary higher-layer tokens. The link is modeled as a packet-erasure channel with loss probability $p$. After packet loss, depacketization, and deinterleaving, the receiver obtains an incomplete layered token observation $\tilde{\mathbf{Z}}^{\star}_{N^{\star},p}$, whose dequantization gives
+\begin{equation}
+\widetilde{\mathbf{h}}=\mathcal{Q}^{-1}\!\left(\tilde{\mathbf{Z}}^{\star}_{N^{\star},p}\right)=\sum_{l=1}^{N}\mathbf{M}^{(l)}_{N^{\star},p}\odot \mathbf{h}^{(l)},
+\end{equation}
+where $\mathcal{Q}^{-1}(\cdot)$ performs RVQ dequantization, $\mathbf{h}^{(l)}$ denotes the dequantized latent contribution of layer $l$, and the binary mask $\mathbf{M}^{(l)}_{N^{\star},p}$ marks which frames survive layer truncation and packet loss; $\widetilde{\mathbf{h}}\in\mathbb{R}^{D\times F}$. Therefore, both untransmitted high layers (due to bitrate reduction) and erased packets (due to channel impairment) result in the same mathematical object: an incomplete observation of the complete latent $\mathbf{h}$. This motivates a unified recovery formulation in which the receiver reconstructs a complete latent representation from $\widetilde{\mathbf{h}}$:
+\begin{equation}
+\widehat{\mathbf{h}}=f_{\theta}(\widetilde{\mathbf{h}},x_{\mathrm{ref}}^{(j)},R),
+\end{equation}
+where $f_{\theta}(\cdot)$ is the receiver-side latent recovery function, $x_{\mathrm{ref}}^{(j)}$ is the reference utterance of the active speaker $j$, and $R$ denotes the target transmitted bitrate. The shared waveform decoder $D_{\psi}(\cdot)$ then maps the completed latent $\widehat{\mathbf{h}}\in\mathbb{R}^{D\times F}$ back to the reconstructed waveform $\hat{x}=D_{\psi}(\widehat{\mathbf{h}})$. With both bitrate reduction and packet erasure cast as incomplete observation of the same latent hierarchy, the central problem thus becomes to design (i) a digital semantic source representation whose layer ordering aligns with semantic importance, and (ii) a recovery function $f_{\theta}$ that reconstructs the complete latent from such incomplete observations, so that both reduced-rate transmission and packet erasure are handled consistently within this unified formulation.
+
+\section{Proposed Method}
+This section presents the proposed PDSSC framework from both architectural and training perspectives. The method consists of three coupled modules, namely a semantic-priority layered codec, a receiver-side low-step generative recovery model, and a lightweight channel-adaptive bitrate controller, which are optimized in three successive stages. Stage I learns the layered codec, Stage II trains the generative recovery model with the codec frozen, and Stage III fits the controller on RD samples generated by the frozen end-to-end pipeline.
+
+\subsection{Semantic-Priority Layered Codec}
+Standard RVQ encodes a residual representation in which semantic content and acoustic characteristics are entangled, so it does not guarantee that the lowest transmitted layers will carry the semantic backbone first. As a result, under aggressive bitrate reduction, the retained representation may still lose information that is critical to intelligibility. As illustrated in Fig.~\ref{fig:codec_arch}, our design treats semantic disentanglement as the central objective of layered representation learning. Instead of relying on residual quantization alone to produce a useful ordering, we explicitly drive the first layer toward pretrained semantic features and the second layer toward pretrained timbre features, so that the lowest two layers capture content and speaker identity as early as possible, while the higher layers are left to progressively encode prosody and other residual acoustic detail.
+
+The key mechanism behind this design is two-layer factor-specific distillation, which explicitly drives the first RVQ layer toward a pretrained semantic teacher and the second RVQ layer toward a pretrained timbre teacher, so that the lowest two layers behave like a semantic backbone and a timbre code respectively, rather than generic acoustic codes. The desired disentanglement does not arise from residual subtraction alone; it emerges from the interplay between factor-specific distillation and residual quantization during joint training. On one hand, the two distillation losses $\mathcal{L}_{\mathrm{dist}}$ and $\mathcal{L}_{\mathrm{tim}}$ explicitly push the first two layers to explain the content- and timbre-related parts of the utterance; on the other hand, the waveform- and spectrogram-level reconstruction losses still require the full stacked representation to recover the original speech. Once the first two layers are committed to matching their respective teachers, the residual reconstruction error they cannot explain is therefore pushed into the later layers. Since this remaining error is dominated by prosody, fine spectral detail, and other residual acoustic factors, the residual recursion naturally directs the upper layers to encode exactly these factors. In this way, factor-specific distillation and residual quantization jointly produce the desired disentanglement, rather than relying on residual subtraction by itself.
+
+The encoder-decoder backbone adopts a SEANet-style architecture~\cite{defossez2023encodec} with a two-layer bidirectional long short-term memory (LSTM) at the encoder output and a two-layer unidirectional LSTM in the decoder. This combination preserves both local acoustic structure and longer-range temporal context before quantization. The residual block used in the encoder and decoder follows the standard two-layer residual design described earlier. Building on the notation in Section II, the encoder output has latent dimension $D=1024$. For each input utterance, we extract $\mathbf{e}_{\mathrm{tch}}$ from a frozen HuBERT model~\cite{hsu2021hubert} as a frame-level teacher representation. HuBERT is a self-supervised speech representation model trained by masked prediction of hidden units on unlabeled clean speech. Because the prediction target is derived from the clean signal itself, the model focuses on what is predictable from surrounding acoustic context---namely phonetic and linguistic structure---while speaker identity, prosody, and other fine acoustic attributes contribute less to the prediction objective and are therefore underrepresented in its hidden states. This content bias makes HuBERT a suitable semantic teacher for the first transmitted layer: distilling the first RVQ layer toward HuBERT features forces the lowest layer to encode content and context rather than speaker-specific or other acoustic detail, so that the residual passed to the upper layers is dominated by speaker-related and other acoustic factors. The dequantized feature of the first RVQ layer is then linearly projected from the codec space to the same 768-dimensional feature space, and a semantic distillation loss is imposed between the projected feature $\mathbf{f}^{(1)}\in\mathbb{R}^{768}$ and the teacher representation $\mathbf{e}_{\mathrm{tch}}\in\mathbb{R}^{768}$. We use
+\begin{equation}
+\mathcal{L}_{\mathrm{dist}}=-\log\sigma\!\left(\cos(\mathbf{f}^{(1)},\mathbf{e}_{\mathrm{tch}})\right)
+\end{equation}
+where $\sigma(\cdot)$ denotes the sigmoid function, which pulls the first RVQ layer toward the teacher semantic space.
+
+For the second RVQ layer, we introduce a timbre distillation teacher to explicitly separate speaker identity from the semantic backbone captured by the first layer. We adopt a frozen ECAPA-TDNN model~\cite{desplanques2020ecapa} for this purpose. ECAPA-TDNN (Emphasized Channel Attention, Propagation and Aggregation Time-Delay Neural Network) is a speaker verification architecture trained to map utterances from the same speaker to close embeddings and those from different speakers to distant ones. Because its training objective is purely speaker discrimination, the model learns to discard content, prosody, and other factors that do not help distinguish speakers, so its embedding is deliberately purified toward speaker identity alone---exactly the factor we want the second layer to encode. The dequantized feature of the second RVQ layer is linearly projected to the ECAPA-TDNN embedding dimension, and we impose a timbre distillation loss
+\begin{equation}
+\mathcal{L}_{\mathrm{tim}}=-\log\sigma\!\left(\cos(\mathbf{f}^{(2)},\mathbf{e}_{\mathrm{tim}})\right)
+\end{equation}
+where $\mathbf{f}^{(2)}$ is the projected second-layer feature and $\mathbf{e}_{\mathrm{tim}}$ is the teacher timbre embedding. Together with the first-layer semantic distillation, this two-layer factor-specific design ensures that the lowest transmitted layers are committed to content and speaker identity, so that the remaining residual passed to the upper layers is dominated by prosodic and fine acoustic factors rather than entangled speaker-related detail.
+
+Compared with a single-stage vector quantizer (VQ), which encodes each frame with one codeword from a single large codebook, RVQ decomposes the quantization into successive residual stages, each using a small codebook of size $K$; this achieves comparable reconstruction fidelity at a much lower per-layer rate and, crucially, produces an ordered layered representation that naturally supports progressive transmission and bitrate adaptation. Under this design, RVQ serves as the mechanism that allocates residual information across layers. It is applied in the usual residual form~\cite{oord2017vqvae}:
+\begin{align}
+\mathbf{r}^{(1)}&=\mathbf{h},\notag\\
+\mathbf{h}^{(l)}&=\mathbf{c}^{(l)}_{z^{(l)}},\notag\\
+\mathbf{r}^{(l+1)}&=\mathbf{r}^{(l)}-\mathbf{h}^{(l)},\notag\\
+z^{(l)}&=\arg\min_{k\in\{0,\ldots,K-1\}}\left\|\mathbf{r}^{(l)}-\mathbf{c}^{(l)}_k\right\|_2^2,
+\label{eq:rvq}
+\end{align}
+where $\mathbf{r}^{(l)}$ is the residual to be quantized at layer $l$, $\mathbf{c}^{(l)}_k$ is the $k$-th codeword of the layer-$l$ codebook, and $\mathbf{h}^{(l)}$ is the selected quantized contribution. In our implementation, we use $N=8$ RVQ layers and focus on the 1.0--4.0 kbps operating range.
+
+In addition, $\mathcal{L}_{\mathrm{rec}}=\|x-\hat{x}\|_1$ is the waveform reconstruction loss, $\mathcal{L}_{\mathrm{mel}}$ is the multi-scale mel-spectrogram loss, $\mathcal{L}_{\mathrm{commit}}$ is the RVQ commitment loss, and $\mathcal{L}_{\mathrm{adv}}$ together with $\mathcal{L}_{\mathrm{fm}}$ denote the adversarial and discriminator feature-matching losses, all weighted by scalar weights $\lambda_{\cdot}$. Stage I jointly trains the encoder, RVQ, and decoder end to end by minimizing
+\begin{align}
+\mathcal{L}_{\mathrm{codec}}&=\lambda_{\mathrm{adv}}\mathcal{L}_{\mathrm{adv}}+\lambda_{\mathrm{fm}}\mathcal{L}_{\mathrm{fm}}+
+\lambda_{\mathrm{mel}}\mathcal{L}_{\mathrm{mel}}+\lambda_{\mathrm{rec}}\mathcal{L}_{\mathrm{rec}}\notag\\
+&\quad+\lambda_{\mathrm{q}}\mathcal{L}_{\mathrm{commit}}+
+\lambda_{\mathrm{dist}}\mathcal{L}_{\mathrm{dist}}+\lambda_{\mathrm{tim}}\mathcal{L}_{\mathrm{tim}}.
+\label{eq:codec_loss}
+\end{align}
+Unlike dual-branch semantic communication designs that separate different semantic streams through architectural duplication, such as DeepSC-RI~\cite{peng2024deepscri}, our method achieves semantic disentanglement and transmission-priority-oriented separation inside a single layered codec. After Stage I, the trained encoder-decoder is frozen and used as the shared front end for both transmission and receiver-side recovery.
+
+\begin{algorithm}[tb]
+\caption{Stage~I: Codec Training with Two-Layer Factor-Specific Distillation}
+\label{alg:codec}
+\begin{algorithmic}[1]
+\REQUIRE Training speech $\mathcal{D}$; frozen HuBERT teacher; frozen ECAPA-TDNN teacher
+\ENSURE Trained encoder $E_{\phi}$, RVQ $\mathcal{Q}$, decoder $D_{\psi}$
+\STATE Initialize $E_{\phi}$, $\mathcal{Q}$, $D_{\psi}$
+\WHILE{not converged}
+\STATE Sample batch $x$ from $\mathcal{D}$
+\STATE $\mathbf{h}\leftarrow E_{\phi}(x)$; \quad $\mathbf{Z}\leftarrow\mathcal{Q}(\mathbf{h})$
+\STATE $\hat{x}\leftarrow D_{\psi}\!\left(\textstyle\sum_{l=1}^{N}\mathbf{h}^{(l)}\right)$
+\STATE \textbf{// Layer-1 semantic distillation (HuBERT)}
+\STATE Extract teacher $\mathbf{e}_{\mathrm{tch}}$ from frozen HuBERT
+\STATE $\mathbf{f}^{(1)}\leftarrow\mathrm{Proj}_{1}(\mathbf{h}^{(1)})$
+\STATE $\mathcal{L}_{\mathrm{dist}}\leftarrow-\log\sigma\!\left(\cos(\mathbf{f}^{(1)},\mathbf{e}_{\mathrm{tch}})\right)$
+\STATE \textbf{// Layer-2 timbre distillation (ECAPA-TDNN)}
+\STATE Extract teacher $\mathbf{e}_{\mathrm{tim}}$ from frozen ECAPA-TDNN
+\STATE $\mathbf{f}^{(2)}\leftarrow\mathrm{Proj}_{2}(\mathbf{h}^{(2)})$
+\STATE $\mathcal{L}_{\mathrm{tim}}\leftarrow-\log\sigma\!\left(\cos(\mathbf{f}^{(2)},\mathbf{e}_{\mathrm{tim}})\right)$
+\STATE Compute $\mathcal{L}_{\mathrm{rec}},\mathcal{L}_{\mathrm{mel}},\mathcal{L}_{\mathrm{commit}},\mathcal{L}_{\mathrm{adv}},\mathcal{L}_{\mathrm{fm}}$
+\STATE $\mathcal{L}_{\mathrm{codec}}\leftarrow\sum\lambda_{\cdot}\mathcal{L}_{\cdot}$ \COMMENT{Eq.~(\ref{eq:codec_loss})}
+\STATE Update $\phi,\mathcal{Q},\psi$ via $\nabla_{\phi,\mathcal{Q},\psi}\mathcal{L}_{\mathrm{codec}}$
+\ENDWHILE
+\RETURN $E_{\phi},\mathcal{Q},D_{\psi}$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{figure*}[tb]
+\centering
+\makebox[\textwidth][c]{\includegraphics[width=0.95\textwidth]{paper_figs/fig2.png}}
+\caption{Architecture of the semantic-priority layered codec.}
+\label{fig:codec_arch}
+\end{figure*}
+
+\subsection{Low-Step Generative Recovery Model}
+The second module is a receiver-side generative recovery model that restores the missing high-layer detail left by bitrate reduction and packet erasure, so that the decoded waveform preserves the transmitted semantic content while restoring speaker-related acoustic detail. Direct decoding of the received partial layered description cannot recover complete speech information when higher layers are not transmitted or when packets are erased. To restore the missing residual detail while keeping inference short enough for real-time operation, as illustrated in Fig.~\ref{fig:timbreflow_arch}, we implement this module as a low-step generative recovery model in flow-matching form~\cite{lipman2023flow}.
+
+This latent-space recovery is effective because bitrate-induced layer omission and channel loss can both be viewed as incomplete observation over the same latent hierarchy, and the missing part is dominated by speaker-related paralinguistic and residual acoustic detail rather than the semantic backbone, so recovering the missing higher layers is far less costly than regenerating the full waveform. Flow matching learns a conditional correction trajectory from the incomplete latent $\widetilde{\mathbf{h}}$ to the target complete latent $\mathbf{h}$; because the model learns the direction of the velocity that drives the latent from the incomplete state toward the complete one, it can flow toward the complete feature in fewer steps rather than sampling from scratch, which is what permits short-step inference at deployment and keeps the receiver-side recovery fast enough for real-time operation. The reference speech does not provide lexical content; instead, it steers recovery toward speaker-consistent paralinguistic and fine acoustic details.
+
+For the active speaker $j$, the receiver retrieves the reference utterance $x_{\mathrm{ref}}^{(j)}$ from the local speech library and encodes it with a pretrained reference encoder to obtain a mixed reference embedding $\mathbf{e}_{\mathrm{ref}}$. Unlike the second-layer timbre teacher, whose representation is deliberately purified toward speaker identity alone, the recovery conditioning must guide reconstruction of the full missing residual---not only timbre but also prosody, spectral fine structure, and other acoustic detail spread across layers 2--8. We therefore adopt a frozen WavLM model~\cite{chen2022wavlm} as the reference encoder. WavLM is a self-supervised speech representation model that extends HuBERT with a denoising-based masked prediction objective: during training, noise and overlapping speech are deliberately added to the input before masking, so the model must separate the target speaker from interference and reconstruct the full acoustic signal. This forces its contextualized hidden states to jointly encode speaker, prosody, and fine acoustic characteristics rather than purifying toward a single factor. Although WavLM's representation also contains content information, this redundancy is not problematic: the semantic backbone is already preserved in the received first-layer latent, and the trainable projection layer can learn to focus on the recovery-relevant non-content factors. This makes WavLM's representation richer and more suitable for multi-factor recovery conditioning than a speaker-discriminative embedding. A trainable projection and pooling layer is applied on top of the frozen WavLM backbone to map its hidden states to a compact embedding. This embedding is combined with a 128-dimensional sinusoidal time embedding and the bitrate condition $R$ to form a unified conditioning signal that modulates the residual blocks of the flow network, whose residual-block structure is the same as that used in the layered codec.
+
+In Stage II, the codec is frozen and the channel simulator is enabled, so each training sample is generated on the fly: the codec produces the complete latent $\mathbf{h}$, and jointly sampled bitrate and packet-loss conditions yield the incomplete counterpart $\widetilde{\mathbf{h}}$. A continuous time variable $\tau\sim\mathcal{U}(0,1)$ is then drawn, and a straight-line interpolation defines the intermediate state along the recovery trajectory,
+\begin{equation}
+\mathbf{h}_{\tau}=(1-\tau)\widetilde{\mathbf{h}}+\tau\mathbf{h},
+\qquad
+\mathbf{v}^{\star}=\mathbf{h}-\widetilde{\mathbf{h}}.
+\end{equation}
+Because $d\mathbf{h}_{\tau}/d\tau=\mathbf{h}-\widetilde{\mathbf{h}}=\mathbf{v}^{\star}$, the target velocity is simply the derivative of this linear path, and sampling $\tau$ over $[0,1]$ lets the network learn the full time-conditioned velocity field. Using the layer-wise availability masks from Section~II, the same velocity can be rewritten to expose its layerwise structure,
+\begin{equation}
+\mathbf{v}^{\star}=
+\sum_{l=1}^{N}\left(1-\mathbf{M}^{(l)}_{N^{\star},p}\right)\odot \mathbf{h}^{(l)},
+\end{equation}
+where $\mathbf{M}^{(l)}_{N^{\star},p}$ is the frame-wise availability mask for layer $l$. This decomposition shows that the velocity points toward exactly the missing latent residual components, so the generative recovery model learns to restore layered residual detail on top of the preserved semantic backbone rather than regenerating the entire representation from scratch. The network $F_{\theta}$ takes the interpolated latent $\mathbf{h}_{\tau}$ as input, conditioned on the continuous time $\tau$, the reference embedding $\mathbf{e}_{\mathrm{ref}}$, and the bitrate $R$, and predicts the conditional vector field
+\begin{equation}
+\mathbf{v}_{\theta}=F_{\theta}(\mathbf{h}_{\tau},\tau,\mathbf{e}_{\mathrm{ref}},R),
+\end{equation}
+which is supervised by the flow-matching objective
+\begin{equation}
+\mathcal{L}_{\mathrm{flow\text{-}comp}}=\mathbb{E}\!\left[w(R)\left\|\mathbf{v}_{\theta}-\mathbf{v}^{\star}\right\|_2^2\right]+\lambda_{\mathrm{stft}}\mathcal{L}_{\mathrm{mrstft}},
+\end{equation}
+where $R$ denotes the target transmitted bitrate in kbps and $\mathcal{L}_{\mathrm{mrstft}}$ is a multi-resolution STFT reconstruction loss between the waveform decoded from the recovered latent and the target waveform. The reference embedding $\mathbf{e}_{\mathrm{ref}}$ and bitrate $R$ do not change the target velocity, but they improve its conditional prediction across speakers and operating points. To emphasize harder low-rate cases, the rate-dependent weight is set as
+\begin{equation}
+w(R)=\max\!\left(1,\frac{5-R}{2}\right),
+\end{equation}
+which monotonically decreases from 4.0 to 1.0 kbps so that lower-rate operating points receive larger training weight. During Stage II, $R$ is sampled from 1.0 to 4.0 kbps with explicit bias toward the lowest-rate regime, and the packet loss probability is sampled from 0 to 30\%. In our implementation, the semantic-first operating point is kept reliable, whereas packet loss is injected only into the supplementary residual information. The spectral regularization term $\lambda_{\mathrm{stft}}\mathcal{L}_{\mathrm{mrstft}}$ further constrains local spectral continuity and fine acoustic detail.
+
+\begin{algorithm}[tb]
+\caption{Stage~II: Recovery Model Training with Flow Matching}
+\label{alg:recovery}
+\begin{algorithmic}[1]
+\REQUIRE Frozen codec $(E_{\phi},\mathcal{Q},D_{\psi})$; frozen WavLM; training speech $\mathcal{D}$ with a same-speaker reference $x_{\mathrm{ref}}^{(j)}$ per speaker $j$
+\ENSURE Trained flow network $F_{\theta}$
+\STATE Initialize $F_{\theta}$
+\WHILE{not converged}
+\STATE Sample $x$ from $\mathcal{D}$; $R\sim[1.0,4.0]$~kbps; $p\sim[0,30\%]$
+\STATE $\mathbf{h}\leftarrow E_{\phi}(x)$; \quad $\mathbf{Z}\leftarrow\mathcal{Q}(\mathbf{h})$
+\STATE Simulate truncation + packet loss $\rightarrow$ incomplete $\widetilde{\mathbf{h}}$
+\STATE Draw reference $x_{\mathrm{ref}}^{(j)}$ of the active speaker $j$; extract $\mathbf{e}_{\mathrm{ref}}$ from frozen WavLM
+\STATE Sample $\tau\sim\mathcal{U}(0,1)$
+\STATE $\mathbf{h}_{\tau}\leftarrow(1-\tau)\widetilde{\mathbf{h}}+\tau\mathbf{h}$
+\STATE $\mathbf{v}^{\star}\leftarrow\mathbf{h}-\widetilde{\mathbf{h}}$
+\STATE $\mathbf{v}_{\theta}\leftarrow F_{\theta}(\mathbf{h}_{\tau},\tau,\mathbf{e}_{\mathrm{ref}},R)$
+\STATE $\mathcal{L}_{\mathrm{flow}}\leftarrow w(R)\|\mathbf{v}_{\theta}-\mathbf{v}^{\star}\|_{2}^{2}+\lambda_{\mathrm{stft}}\mathcal{L}_{\mathrm{mrstft}}$
+\STATE Update $\theta$ via $\nabla_{\theta}\mathcal{L}_{\mathrm{flow}}$
+\ENDWHILE
+\RETURN $F_{\theta}$
+\end{algorithmic}
+\end{algorithm}
+
+At inference time, a low-step Euler solver recovers the latent representation:
+\begin{equation}
+\widehat{\mathbf{h}}^{(k+1)}=\widehat{\mathbf{h}}^{(k)}+\Delta \tau\,F_{\theta}(\widehat{\mathbf{h}}^{(k)},\tau_k,\mathbf{e}_{\mathrm{ref}},R),
+\end{equation}
+where $\Delta\tau$ is the step size and $k=0,\ldots,S-1$ indexes the $S$ inference steps, initialized from $\widehat{\mathbf{h}}^{(0)}=\widetilde{\mathbf{h}}$. Because the flow starts from an already informative incomplete latent rather than pure noise, the recovery path is substantially shorter than unconditional generation, which makes low-step inference sufficient for this task.
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=\linewidth]{paper_figs/fig3.png}
+\caption{Architecture and Stage-II training of the low-step generative recovery module.}
+\label{fig:timbreflow_arch}
+\end{figure}
+
+Both stages of PDSSC are assembled from a common residual block, whose internal structure is shown in Fig.~\ref{fig:resblock}. The block follows a two-convolution residual topology: a residual branch applies two stacked 1-D convolutions and projects back to the input channel dimension, and its output is added to a skip connection that preserves the input. In Stage~I, this unit is instantiated as a SEANet-style residual block: an ELU activation precedes each convolution (with kernels of size 3 and 1), the intermediate width is compressed to half the channel dimension to reduce cost, the convolutions are weight-normalized, and a true identity skip is used. In Stage~II, the same residual topology is reused inside the generative recovery network with two dilated 3-kernel convolutions; to inject the conditioning signal, a feature-wise linear modulation (FiLM) layer applies a reference-, time-, and bitrate-dependent affine transform to the intermediate features, while GroupNorm together with SiLU replaces weight normalization and ELU so that the block stays stable under conditional generation. Reusing one residual design across both stages keeps the parameterization compact and lets the frozen codec front end and the trainable recovery network share a common local-feature vocabulary.
+
+\begin{algorithm}[tb]
+\caption{End-to-End Inference of PDSSC}
+\label{alg:inference}
+\begin{algorithmic}[1]
+\REQUIRE Input speech $x$; speaker ID $j$; channel estimate $\hat{p}$; rate budget $R_{\max}$
+\ENSURE Reconstructed waveform $\hat{x}$
+\STATE $R^{\star}\leftarrow\arg\min_{R\in\mathcal{R}}\mathcal{J}(R,\hat{p})$ \text{s.t.}\; $R\le R_{\max}$ \COMMENT{controller}
+\STATE $N^{\star}\leftarrow R^{\star}/(0.5\,\mathrm{kbps})$
+\STATE $\mathbf{h}\leftarrow E_{\phi}(x)$; \quad $\mathbf{Z}\leftarrow\mathcal{Q}(\mathbf{h})$
+\STATE Select $\mathbf{Z}^{\star}_{N^{\star}}=[z^{(1)},\ldots,z^{(N^{\star})}]$
+\STATE Interleave + packetize; transmit over packet-erasure channel
+\STATE Depacketize + deinterleave $\rightarrow\widetilde{\mathbf{Z}}^{\star}_{N^{\star},p}$
+\STATE $\widetilde{\mathbf{h}}\leftarrow\mathcal{Q}^{-1}(\widetilde{\mathbf{Z}}^{\star}_{N^{\star},p})$
+\STATE Retrieve $x_{\mathrm{ref}}^{(j)}$; extract $\mathbf{e}_{\mathrm{ref}}$ from frozen WavLM
+\STATE $\widehat{\mathbf{h}}^{(0)}\leftarrow\widetilde{\mathbf{h}}$
+\FOR{$k=0$ \TO $S-1$}
+\STATE $\widehat{\mathbf{h}}^{(k+1)}\leftarrow\widehat{\mathbf{h}}^{(k)}+\Delta\tau\,F_{\theta}(\widehat{\mathbf{h}}^{(k)},\tau_{k},\mathbf{e}_{\mathrm{ref}},R^{\star})$
+\ENDFOR
+\STATE $\hat{x}\leftarrow D_{\psi}(\widehat{\mathbf{h}}^{(S)})$
+\RETURN $\hat{x}$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=0.65\linewidth]{paper_figs/fig9.png}
+\caption{Internal structure of the shared residual block used in both the layered codec (Stage~I) and the generative recovery network (Stage~II).}
+\label{fig:resblock}
+\end{figure}
+
+\subsection{Channel-Adaptive Bitrate Control}
+To avoid the complexity of manual bitrate switching and improve transmission efficiency, we design a lightweight channel-adaptive bitrate controller. Because the transmitted bitrate is determined by how many leading RVQ layers are selected, channel adaptation can be formulated directly over bitrate operating points. This keeps the controller lightweight: since the codec and the receiver-side generative recovery model are already frozen after Stage II, the end-to-end rate-distortion (RD) tradeoff is a stable mapping that can be characterized once by sampling the frozen pipeline, so a small policy network suffices to learn the bitrate decision over this fixed RD surface rather than retraining the entire system.
+
+Given the estimated packet loss rate $\hat{p}$ and the available source-rate budget $R_{\max}$, the controller minimizes
+\begin{equation}
+\mathcal{J}(R,\hat{p})=\hat{D}_{\omega}(R,\hat{p})+\lambda_R R,
+\label{eq:rd_cost}
+\end{equation}
+where $\hat{D}_{\omega}(R,\hat{p})$ is the predicted distortion after channel degradation and receiver-side recovery, $\lambda_R$ is a bitrate cost weight, and $\omega$ denotes the controller parameters. The bitrate decision is then
+\begin{equation}
+R^{\star}(\hat{p})=\arg\min_{R\in\mathcal{R}} \mathcal{J}(R,\hat{p})
+\quad \text{s.t.}\quad R\le R_{\max},
+\label{eq:rd_rule}
+\end{equation}
+over $\mathcal{R}=\{1.0,1.5,\ldots,4.0\}$ kbps.
+
+To train the controller, we freeze the codec and the generative recovery model, sample utterances and packet loss rates, and evaluate the trained end-to-end pipeline over all candidate bitrate operating points. Let $\hat{x}_{x,R,p}$ denote the reconstructed waveform produced by the frozen end-to-end system for input utterance $x$, bitrate operating point $R$, and packet loss rate $p$. For each utterance $x$ and channel condition $p$, this produces a set of realized distortions
+\begin{equation}
+D^{\star}(x,R,p)=d\!\left(\hat{x}_{x,R,p},x\right).
+\end{equation}
+where $d(\cdot,\cdot)$ denotes the distortion metric used to score reconstruction quality.
+The controller is parameterized by a small policy network that takes $\hat{p}$ together with $R_{\max}$ as input and outputs a score over candidate bitrate operating points. During training, the score vector is converted to a soft decision distribution
+\begin{equation}
+\pi_{\omega}(R|\hat{p},R_{\max})=\frac{\exp(-\hat{D}_{\omega}(R,\hat{p})/T_c)}{\sum_{r\in\mathcal{R}}\exp(-\hat{D}_{\omega}(r,\hat{p})/T_c)},
+\end{equation}
+where $T_c$ is a temperature parameter. We then optimize the expected RD objective
+\begin{equation}
+\begin{aligned}
+\mathcal{L}_{\mathrm{ctrl}}
+=\mathbb{E}_{x,p}\!\Big[
+\sum_{R\in\mathcal{R}}\pi_{\omega}(R|\hat{p},R_{\max})
+\left(D^{\star}(x,R,p)+\lambda_R R\right)
+\Big].
+\end{aligned}
+\label{eq:ctrl_loss}
+\end{equation}
+We refer to these tuples $(x,R,p,D^{\star}(x,R,p))$ as rate-distortion (RD) samples. In Stage III, the codec and generative recovery model are frozen, and the controller is trained by minimizing the expected RD cost in Equation~\eqref{eq:ctrl_loss} over RD samples generated by the end-to-end system. At deployment, the learned distortion predictor $\hat{D}_{\omega}$ directly maps the current channel estimate $\hat{p}$ and rate budget $R_{\max}$ to a hard bitrate decision via Equation~\eqref{eq:rd_rule}, without re-running the full pipeline. Because the controller is a small policy network operating only over the discrete bitrate set $\mathcal{R}$, it adds negligible inference overhead while keeping the system responsive to time-varying channel conditions.
+
+\section{Experimental Results and Analysis}
+We evaluate PDSSC from four complementary perspectives: quality-bitrate tradeoff, packet-loss robustness, qualitative reconstruction, and deployment efficiency. All experiments are conducted on LibriSpeech~\cite{panayotov2015librispeech}, with the codec and recovery model trained on \texttt{train-clean-100} and the main results reported on \texttt{test-clean}. Training uses four NVIDIA A40 GPUs in about 50 hours, while evaluation and latency measurement are performed on a single NVIDIA RTX 3090 workstation. Unless otherwise stated, packet loss is implemented as Bernoulli random erasure on transmitted token frames. Following the design in Section~II, token positions are interleaved across packets before transmission; with the interleaving depth exceeding the typical burst length of the target channel, bursty erasures appear as approximately independent frame-level erasures at the receiver, so the Bernoulli model remains representative of the packetized regime under study, and the recovery mechanism is agnostic to the underlying loss statistics. We compare against the conventional codecs AAC and Opus, the neural codec EnCodec, and the recent low-bitrate semantic baseline error-resilient semantic communication (ESC)~\cite{han2025esc}; to ensure a fair comparison under packet-loss channels, all baselines are equipped with their respective packet-loss-resilience tools, i.e., low-bitrate redundancy (LBRR) for Opus and low-frame-rate packet loss concealment (LFR-PLC) for AAC, EnCodec, and ESC.
+
+\subsection{Quality-Bitrate Tradeoff}
+
+We first analyze the quality-bitrate tradeoff under a fixed packet loss rate of 5\%, as shown in Fig.~\ref{fig:rate_visqol} and~\ref{fig:rate_utmos}. PDSSC is evaluated from 1.0 to 4.0 kbps at 0.5 kbps intervals, with ViSQOL~\cite{chinen2020visqolv3} measuring objective speech quality and UTMOS~\cite{saeki2022utmos} perceptual naturalness. On both metrics PDSSC rises steeply from the lowest bitrate and reaches its plateau the fastest, whereas the conventional codecs remain nearly flat across the tested range and only approach comparable quality at several times the rate. The advantage is most pronounced below 2.0 kbps, the regime where the source representation must decide what to transmit first and what to defer: at 1.0 kbps, PDSSC already matches the perceptual quality that ESC attains only at 1.5 kbps. This matters because ESC is not a weak reference but one of the strongest existing semantic speech codecs in this low-rate region, and it is already equipped with packet-loss protection; improving over such a protected baseline at a lower rate indicates a genuine gain in representation efficiency rather than a superficial coding advantage. As shown in the insets, a similar margin persists at neighboring operating points, where PDSSC consistently surpasses ESC while using fewer bits.
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=\linewidth]{paper_figs/fig4_visqol.pdf}
+\caption{ViSQOL vs.\ bitrate under 5\% packet loss.}
+\label{fig:rate_visqol}
+\end{figure}
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=\linewidth]{paper_figs/fig4_utmos.pdf}
+\caption{UTMOS vs.\ bitrate under 5\% packet loss.}
+\label{fig:rate_utmos}
+\end{figure}
+
+The broader comparison with the remaining baselines leads to the same conclusion. Compared with conventional speech codecs, PDSSC reaches similar or better quality at much lower bitrate, indicating more effective use of the limited transmission budget. Relative to EnCodec, the advantage is more revealing: both systems are discrete neural codecs, but PDSSC maintains a markedly better quality-bitrate tradeoff in the low-rate region. The gain therefore does not come merely from replacing a conventional codec with a neural one, but from reorganizing the transmitted information into a progressively structured semantic hierarchy and then compensating the omitted residual detail at the receiver.
+
+To further explain the quality-bitrate advantage in Fig.~\ref{fig:rate_visqol} and~\ref{fig:rate_utmos}, Fig.~\ref{fig:disentangle} provides a feature-space visualization that compares the layer-wise feature organization of PDSSC and EnCodec across three stages: the first quantization layer, the second layer, and the aggregation of layers 2--8, with each point coloured by speaker. The contrast between the two models is immediate. In PDSSC, the first-layer points are broadly and relatively uniformly spread across the feature space with no visible speaker grouping, i.e.~speaker points are interspersed rather than clustered, which indicates that this layer has largely stripped speaker-dependent variation and kept a speaker-invariant semantic organization. Moving to the second layer and then to the layers 2--8 sum, the points of the same speaker progressively collapse into tight clusters, while the separations between different speaker clusters grow clearly wider and more distinct. Such an evolution, from dispersed points to compact intra-speaker clusters with large inter-speaker margins, is exactly what a progressive semantic-to-speaker disentanglement should look like: the early layer carries semantic content shared across speakers, and the higher layers successively absorb the residual paralinguistic and speaker-related attributes that are semantically irrelevant.
+
+EnCodec behaves differently. Its first-layer points already form diffuse speaker clusters that overlap noticeably between speakers, so semantic content is never cleanly separated from speaker identity at the bottom of the hierarchy; at the second layer and the layers 2--8 sum the clusters remain loosely organized, with smaller inter-speaker separations and no clear progressive tightening. In other words, EnCodec's features stay coupled across layers, so lowering its bitrate prunes semantic and non-semantic information together rather than mainly trimming the refinable residual. PDSSC instead enforces a much clearer progressive separation---uniformly distributed speaker points at the first layer versus compact, well-separated speaker clusters at the higher layers---so reducing the transmitted bitrate mainly suppresses the residual content while preserving the part most critical to intelligibility.
+
+
+\begin{figure}[tb]
+\centering
+\makebox[\linewidth][c]{\includegraphics[width=0.95\linewidth]{paper_figs/fig5.pdf}}
+\caption{Layer-wise feature visualization of PDSSC and EnCodec: first layer, second layer, and summed layers 2--8.}
+\label{fig:disentangle}
+\end{figure}
+
+\subsection{Packet-Loss Robustness}
+
+We next examine robustness under increasing packet loss, as shown in Fig.~\ref{fig:plr_visqol} and~\ref{fig:plr_plcmos}. In this experiment, PDSSC is tested at average 1.5 and 3.0 kbps, while the competing methods are evaluated at their corresponding operating points, including higher-rate protected baselines such as Opus at 8.0 kbps. Here, ViSQOL again measures overall speech quality, while PLCMOS~\cite{diener2023plcmos} is included because it is a non-intrusive perceptual metric specifically designed for packet-loss concealment conditions. PDSSC degrades much more gracefully than the competing methods as the channel becomes unreliable. Under both bitrate reduction and packet erasure, the missing components are dominated by higher-layer speaker-related and other semantically irrelevant residual attributes, while most of the semantic backbone is still preserved in the received latent representation. The receiver-side low-step generative recovery model is therefore highly targeted: rather than regenerating speech from scratch, it uses same-speaker prior knowledge to compensate for the missing high-layer detail on top of an already informative latent observation. Because the recovery objective is to recover the original full latent $\mathbf{h}$ from incomplete observations, the restored quality remains stable even when channel losses become more severe.
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=\linewidth]{paper_figs/fig6_visqol.pdf}
+\caption{ViSQOL vs.\ packet loss rate.}
+\label{fig:plr_visqol}
+\end{figure}
+
+The quantitative trends at average 3.0 and 1.5 kbps further support this interpretation. At 3.0 kbps, PDSSC stays above 4.0 in ViSQOL across the entire packet-loss range, whereas both EnCodec and ESC fall substantially more over the same interval; the same trend holds at 1.5 kbps, where the transmitted description is more incomplete from the outset and recovery is therefore more challenging, yet the PDSSC curves remain consistently above the corresponding baselines throughout. This is consistent with the design logic of PDSSC: the more aggressive the bitrate reduction, the more valuable the targeted receiver-side recovery becomes, further strengthened by the hard-case-oriented training strategy in which low-rate operating points receive larger sampling emphasis and higher loss weight.
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=\linewidth]{paper_figs/fig6_plcmos.pdf}
+\caption{PLCMOS vs.\ packet loss rate.}
+\label{fig:plr_plcmos}
+\end{figure}
+
+We further isolate the role of the receiver-side generative recovery model through the ablation results in Fig.~\ref{fig:abl_visqol} and~\ref{fig:abl_plcmos}. The effect is unambiguous: with the recovery model, the curves consistently remain above those without it over the whole packet-loss range, and the margin is especially pronounced in PLCMOS, confirming that the robustness gain in Fig.~\ref{fig:plr_visqol} and~\ref{fig:plr_plcmos} does not arise from the layered codec alone but critically depends on receiver-side recovery of the missing speaker-related and fine acoustic detail that governs perceptual continuity after packet erasure. EnCodec, whose RVQ representation lacks semantic-priority ordering and whose low-frame-rate concealment is a conventional signal-domain tool rather than a generative recovery, serves as an external reference for the stripped configuration. Even without the recovery model, PDSSC maintains a clear margin over this reference---at 1.5 kbps and 0\% packet loss, the no-recovery variant reaches 4.00 in ViSQOL versus 3.49 for EnCodec---indicating that the semantic-priority layered representation itself accounts for part of the robustness, on top of which the generative recovery contributes additional gains.
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=\linewidth]{paper_figs/fig8_visqol.pdf}
+\caption{Ablation: ViSQOL with and without generative recovery. EnCodec, which lacks semantic-priority layer ordering and generative recovery, serves as the external reference for the \emph{w/o semantic ordering} configuration in the legend. The \emph{w/o controller} curve is a controller-level simulation replayed from the measured RD table.}
+\label{fig:abl_visqol}
+\end{figure}
+
+The gap is also larger at lower bitrate, consistent with the training objective: because the model always targets the same complete latent $\mathbf{h}$ regardless of transmitted depth, fewer layers leave more residual to recover, so speaker-prior-guided recovery becomes more valuable---at 30\% loss and 1.5 kbps, where more than half of the latent layers are untransmitted, it lifts PLCMOS by more than half a point. The contrast against the external reference is even more telling: at 30\% loss and 1.5 kbps, the no-recovery variant degrades to 2.70 in PLCMOS, virtually coinciding with EnCodec (2.70), while the full system maintains 3.35---at the most hostile operating point, the generative recovery is exactly what separates PDSSC from the stripped configuration. Taken together, these results show that the low-step generative recovery model is what allows PDSSC to convert incomplete layered observations into stable high-quality recovery, especially in the most challenging low-rate conditions.
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=\linewidth]{paper_figs/fig8_plcmos.pdf}
+\caption{Ablation: PLCMOS with and without generative recovery. EnCodec serves as the external reference for the \emph{w/o semantic ordering} configuration in the legend. The \emph{w/o controller} curve is a controller-level simulation replayed from the measured RD table.}
+\label{fig:abl_plcmos}
+\end{figure}
+
+\subsection{Channel-Adaptive Bitrate Control}
+
+We finally evaluate the channel-adaptive bitrate controller of Section~III-C. Because the codec and the generative recovery model are frozen after Stage~III, the RD surface of the end-to-end pipeline is a stable object that can be characterized once and replayed; we therefore validate the controller directly on the measured quality table $Q(R,p)$ (with generative recovery, over the seven packet-loss states of Fig.~\ref{fig:abl_visqol}) under a uniform distribution over these states. This is a controller-level evaluation on already-measured data and requires no additional codec measurements. The measured packet-loss coverage spans the layer counts $N\in\{3,\ldots,6\}$ (1.5--3.0 kbps); the remaining rates of the controller's operating set are covered by the bitrate measurements of Fig.~\ref{fig:rate_visqol} at 5\% loss. Two policies are compared in the average-bitrate domain. The fixed-gear policy (w/o controller) transmits a constant layer count $R$ in every channel state, yielding the expected quality $\mathbb{E}_p[Q(R,p)]$. The adaptive policy (w/ controller) selects, for each state $p$, the gear $R^{\star}(p)=\arg\max_{R\in\mathcal{R}}[Q(R,p)-\lambda_R R]$ and transmits at the average rate $\bar{R}=\mathbb{E}_p[R^{\star}(p)]$, where the penalty coefficient $\lambda_R$ sweeps the operating point along the rate axis.
+
+Fig.~\ref{fig:controller_visqol} and~\ref{fig:controller_plcmos} plot the expected quality versus the average bitrate of both policies. At equal average bitrate the adaptive policy matches or slightly exceeds the fixed gear---by up to 0.01 on both metrics---consistent with the state-wise optimality of the switching rule; the gap is small because the measured RD surface is smooth in the loss probability, so the practical value of the controller lies in automatic rate switching under time-varying channels rather than in a peak-quality improvement. The switching policy attains its larger benefit on the rate axis: when both policies must keep a target quality $Q_0$ in every channel state, the fixed gear has to provision for the worst state at all times, whereas the controller raises the rate only when the channel degrades, saving up to 26\% of the average bitrate at $Q_0=3.97$~ViSQOL (from 2.50 to 1.86 kbps) and up to 36\% on PLCMOS at $Q_0=3.65$. The controller itself is a small policy network (Table~\ref{tab:complexity}, 0.008 GFLOPs) mapping the channel estimate and rate budget to a layer count, so both the quality match and the rate saving are obtained at negligible inference overhead. The fixed-gear variant without the controller is also shown in Fig.~\ref{fig:abl_visqol} and~\ref{fig:abl_plcmos} for reference: transmitting a constant layer count in every channel state (shown at 1.5 kbps), it trails the full PDSSC by a small margin that widens with the loss rate, consistent with the analysis above.
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=\linewidth]{paper_figs/fig9_controller_visqol.pdf}
+\caption{Expected quality versus average bitrate with and without the channel-adaptive controller, under a uniform distribution over the measured packet-loss states (ViSQOL).}
+\label{fig:controller_visqol}
+\end{figure}
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=\linewidth]{paper_figs/fig9_controller_plcmos.pdf}
+\caption{Expected quality versus average bitrate with and without the channel-adaptive controller, under a uniform distribution over the measured packet-loss states (PLCMOS).}
+\label{fig:controller_plcmos}
+\end{figure}
+
+\subsection{Qualitative Analysis and Deployment Efficiency}
+
+We complement the quantitative results with a qualitative time-frequency view of the reconstructed signal and an assessment of the computational and real-time cost of PDSSC. Fig.~\ref{fig:mel_compare} compares a representative mel-spectrogram from the test set. The spectrum reconstructed by PDSSC stays visibly closer to the original signal: harmonic stripes remain sharp and continuous across frames, and formant trajectories keep their natural bending rather than being flattened. The competing baselines, in contrast, exhibit more pronounced over-smoothing, local blurring around transient onsets, and missing fine detail in the upper spectral region, which together flatten perceptually salient cues. These observations are consistent with the quantitative gains above and indicate that the advantage of PDSSC is a structural reconstruction improvement rather than a single-metric artifact. Whether such an improvement is practical, however, depends on its computational cost, which we examine next.
+
+\begin{figure}[tb]
+\centering
+\makebox[\linewidth][c]{\includegraphics[width=0.92\linewidth]{paper_figs/fig7.pdf}}
+\caption{Mel-spectrogram comparison of PDSSC and competing methods on a representative test case.}
+\label{fig:mel_compare}
+\end{figure}
+
+On the deployment side, Tables~\ref{tab:complexity} and~\ref{tab:latency} report the computational and real-time cost of PDSSC. Table~\ref{tab:complexity} shows that cost is concentrated where it is unavoidable---the semantic encoder and decoder that form the codec backbone---while the modules that actually differentiate PDSSC remain light: the RVQ codebooks add only moderate complexity, the adaptive controller is essentially negligible, and the generative recovery model is markedly lighter than the backbone itself. This distribution is deliberate: the robustness gain comes from a targeted, low-step recovery mechanism rather than an over-parameterized receiver, so the quality and robustness that distinguish PDSSC do not translate into a proportional increase in deployment cost.
+
+\begin{table}[tb]
+\caption{Model complexity of the proposed PDSSC system.}
+\label{tab:complexity}
+\centering
+\begin{tabular}{lcc}
+\hline
+Module & GFLOPs & Params (M) \\
+\hline
+Semantic Encoder & 58.694 & 103.676 \\
+RVQ Codebooks & 4.198 & 8.389 \\
+Adaptive Controller & 0.008 & 0.031 \\
+Generative Recovery Model & 11.726 & 58.470 \\
+Semantic Decoder & 111.256 & 103.676 \\
+Total & 185.882 & 274.242 \\
+\hline
+\end{tabular}
+\end{table}
+
+The latency comparison in Table~\ref{tab:latency} corroborates this observation. At a common 3.0~kbps operating point, PDSSC attains an average end-to-end delay of 0.151~s, substantially lower than the semantic baselines ESC (0.330~s) and LargeSC~\cite{tian2025lsm} (0.46~s). The reduction is attributable to the low-step recovery design: a compact generative receiver requires fewer iterative denoising steps and, accordingly, a shorter buffering window. EnCodec exhibits a lower delay of 0.103~s but does not provide the low-bitrate reconstruction quality or packet-loss robustness reported above, indicating that its latency advantage is realized at the expense of performance under the operating conditions of interest; Opus~+~LBRR achieves 0.071~s only at 8.0~kbps, confirming that conventional signal-domain codecs retain a latency advantage when the bitrate budget is relaxed. Collectively, these results show that PDSSC achieves a more favorable tradeoff between recovery capability and deployment efficiency than the semantic baselines: it maintains markedly lower latency than comparable semantic systems while retaining the low-bitrate quality and packet-loss robustness that lower-latency alternatives lack, making it practical for real-time speech communication.
+
+\begin{table}[tb]
+\caption{End-to-end latency comparison of PDSSC and competing methods. The latency value of LargeSC is taken from the original paper~\cite{tian2025lsm}.}
+\label{tab:latency}
+\centering
+\begin{tabular}{lccc}
+\hline
+Method & Sample rate (kHz) & Bitrate (bps) & Delay (s) \\
+\hline
+PDSSC & 16.0 & 3000 & 0.151 \\
+EnCodec + LFR-PLC & 24.0 & 3000 & 0.103 \\
+ESC + LFR-PLC & 16.0 & 3000 & 0.330 \\
+LargeSC & 24.0 & 2060 & 0.46 \\
+Opus + LBRR & 24.0 & 8000 & 0.071 \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Conclusion}
+PDSSC addresses digital semantic speech communication over low-bitrate and packet-loss-prone channels by combining a semantic-priority layered discrete representation, a speaker-prior-guided low-step generative recovery model, and lightweight bitrate control within one unified framework. This design enables progressive transmission, targeted receiver-side recovery, and flexible rate adaptation under constrained links. Experimental results show that PDSSC achieves a favorable quality-bitrate tradeoff, degrades more gracefully under packet loss than the compared baselines, and remains practical for real-time deployment. Future work will focus on lower-latency streaming recovery, more flexible channel adaptation, content-level intelligibility assessment based on automatic speech recognition, and evaluation under more realistic wireless conditions.
+
+\begin{thebibliography}{00}
+
+\bibitem{3gpp_ntn} 3GPP, ``Non-terrestrial networks (NTN),'' accessed May 12, 2026. [Online]. Available: \url{https://www.3gpp.org/technologies/ntn-overview}
+
+\bibitem{cheng2022sagin} N. Cheng, W. Quan, W. Shi, H. Wu, and X. Shen, ``Space-air-ground integrated network (SAGIN) for 6G: Requirements, architecture, and challenges,'' \emph{IEEE Communications Magazine}, vol. 60, no. 11, pp. 90--96, Nov. 2022.
+
+\bibitem{ngmn_ntn} NGMN Alliance, ``Non-terrestrial networks position paper,'' 2023. [Online]. Available: \url{https://www.ngmn.org/publications/ntn-position-paper.html}
+
+\bibitem{iso_aac} ISO/IEC, ``Information technology -- Coding of audio-visual objects -- Part 3: Audio,'' ISO/IEC 14496-3:2019, 2019.
+
+\bibitem{valin2012opus} J.-M. Valin, K. Vos, and T. Terriberry, ``Definition of the Opus audio codec,'' IETF RFC 6716, Sept. 2012.
+
+\bibitem{qin2021semcom} Z. Qin, X. Tao, J. Lu, W. Tong, and G. Y. Li, ``Semantic communications: Principles and challenges,'' arXiv preprint arXiv:2201.01389, 2021. [Online]. Available: \url{https://arxiv.org/abs/2201.01389}
+
+\bibitem{nguyen2025survey} L. X. Nguyen, A. D. Raha, P. S. Aung, D. Niyato, Z. Han, and C. S. Hong, ``A contemporary survey on semantic communications: Theory of mind, generative AI, and deep joint source-channel coding,'' arXiv preprint arXiv:2502.16468, 2025. [Online]. Available: \url{https://arxiv.org/abs/2502.16468}
+
+\bibitem{weng2020deepscs} Z. Weng, Z. Qin, and G. Y. Li, ``Semantic communications for speech signals,'' arXiv preprint arXiv:2012.05369, 2020. [Online]. Available: \url{https://arxiv.org/abs/2012.05369}
+
+\bibitem{xie2021deepsc} H. Xie, Z. Qin, G. Y. Li, and B.-H. Juang, ``Deep learning enabled semantic communication systems,'' \emph{IEEE Transactions on Signal Processing}, vol. 69, pp. 2663--2675, 2021.
+
+\bibitem{weng2022deepscst} Z. Weng, Z. Qin, X. Tao, C. Pan, G. Liu, and G. Y. Li, ``Deep learning enabled semantic communications with speech recognition and synthesis,'' arXiv preprint arXiv:2205.04603, 2022. [Online]. Available: \url{https://arxiv.org/abs/2205.04603}
+
+\bibitem{xiao2023dsst} Z. Xiao, S. Yao, J. Dai, S. Wang, K. Niu, and P. Zhang, ``Wireless deep speech semantic transmission,'' in \emph{Proc. IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)}, 2023.
+
+\bibitem{defossez2023encodec} A. D\'efossez, J. Copet, G. Synnaeve, and Y. Adi, ``High fidelity neural audio compression,'' \emph{Transactions on Machine Learning Research}, 2023.
+
+\bibitem{kumar2023dac} R. Kumar, P. Seetharaman, S. Luebs, A. Kumar, and K. Kumar, ``High-fidelity audio compression with improved RVQGAN,'' in \emph{Proc. Advances in Neural Information Processing Systems (NeurIPS)}, 2023.
+
+\bibitem{chen2025rvqgan} X. Chen, J. Wang, J. Huang, M. Zeng, Z. Zheng, and Z. Fei, ``Low-bitrate high-quality digital semantic communication based on RVQGAN,'' \emph{IEEE Internet of Things Journal}, vol. 12, no. 10, pp. 13525--13537, 2025.
+
+\bibitem{vanoord2016wavenet} A. van den Oord et al., ``WaveNet: A generative model for raw audio,'' arXiv preprint arXiv:1609.03499, 2016. [Online]. Available: \url{https://arxiv.org/abs/1609.03499}
+
+\bibitem{kong2020hifigan} J. Kong, J. Kim, and J. Bae, ``HiFi-GAN: Generative adversarial networks for efficient and high fidelity speech synthesis,'' in \emph{Proc. Advances in Neural Information Processing Systems (NeurIPS)}, 2020.
+
+\bibitem{ho2020ddpm} J. Ho, A. Jain, and P. Abbeel, ``Denoising diffusion probabilistic models,'' in \emph{Proc. Advances in Neural Information Processing Systems (NeurIPS)}, 2020.
+
+\bibitem{popov2021gradtts} V. Popov, I. Vovk, V. Gogoryan, T. Sadekova, and J. Kautz, ``Grad-TTS: Diffusion probabilistic model for text-to-speech,'' in \emph{Proc. International Conference on Machine Learning (ICML)}, 2021.
+
+\bibitem{wang2023valle} C. Wang et al., ``VALL-E: Neural codec language models are zero-shot text to speech synthesizers,'' arXiv preprint arXiv:2301.02111, 2023. [Online]. Available: \url{https://arxiv.org/abs/2301.02111}
+
+\bibitem{tian2025lsm} Y. Tian, Z. Qin, G. Lv, Y. Jin, K. Huang, and Z. Han, ``Large speech model enabled semantic communication,'' arXiv preprint arXiv:2512.04711, 2025. [Online]. Available: \url{https://arxiv.org/abs/2512.04711}
+
+\bibitem{han2025esc} Z. Han, J. Dai, S. Yao, J. Wang, Y. Li, K. Niu, W. Xu, and P. Zhang, ``Error-resilient semantic communication for speech transmission over packet-loss networks,'' arXiv preprint arXiv:2512.08203, 2025. [Online]. Available: \url{https://arxiv.org/abs/2512.08203}
+
+\bibitem{xin2024bigcodec} Y. Xin, R. Du, W. Han, W. Wang, Z. Ma, and Z. Luo, ``BigCodec: Pushing the limits of low-bitrate neural speech codec,'' arXiv preprint arXiv:2409.05377, 2024. [Online]. Available: \url{https://arxiv.org/abs/2409.05377}
+
+\bibitem{hsu2021hubert} W.-N. Hsu, B. Bolte, Y.-H. H. Tsai, K. Lakhotia, R. Salakhutdinov, and A. Mohamed, ``HuBERT: Self-supervised speech representation learning by masked prediction of hidden units,'' \emph{IEEE/ACM Transactions on Audio, Speech, and Language Processing}, vol. 29, pp. 3451--3460, 2021.
+
+\bibitem{desplanques2020ecapa} B. Desplanques, J. Thienpondt, and K. Demuynck, ``ECAPA-TDNN: Emphasized channel attention, propagation and aggregation in TDNN-based speaker verification,'' in \emph{Proc. Interspeech}, 2020, pp. 3830--3834.
+
+\bibitem{oord2017vqvae} A. van den Oord, O. Vinyals, and K. Kavukcuoglu, ``Neural discrete representation learning,'' in \emph{Proc. Advances in Neural Information Processing Systems (NeurIPS)}, 2017.
+
+\bibitem{peng2024deepscri} X. Peng, Z. Qin, X. Tao, J. Lu, and K. B. Letaief, ``A robust semantic communication system for image,'' arXiv preprint arXiv:2403.09222, 2024. [Online]. Available: \url{https://arxiv.org/abs/2403.09222}
+
+\bibitem{lipman2023flow} Y. Lipman, R. T. Q. Chen, H. Ben-Hamu, M. Nickel, and M. Le, ``Flow matching for generative modeling,'' in \emph{Proc. International Conference on Learning Representations (ICLR)}, 2023.
+
+\bibitem{chen2022wavlm} S. Chen et al., ``WavLM: Large-scale self-supervised pre-training for full stack speech processing,'' \emph{IEEE/ACM Transactions on Audio, Speech, and Language Processing}, vol. 30, pp. 3388--3402, 2022.
+
+\bibitem{panayotov2015librispeech} V. Panayotov, G. Chen, D. Povey, and S. Khudanpur, ``LibriSpeech: An ASR corpus based on public domain audio books,'' in \emph{Proc. IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)}, 2015, pp. 5206--5210.
+
+\bibitem{chinen2020visqolv3} M. Chinen, F. S. C. Lim, J. Skoglund, N. Gureev, F. O'Gorman, and A. Hines, ``ViSQOL v3: An open source production ready objective speech and audio metric,'' arXiv preprint arXiv:2004.09584, 2020. [Online]. Available: \url{https://arxiv.org/abs/2004.09584}
+
+\bibitem{saeki2022utmos} T. Saeki, D. Xin, W. Nakata, T. Koriyama, S. Takamichi, and H. Saruwatari, ``UTMOS: UTokyo-SaruLab system for VoiceMOS Challenge 2022,'' in \emph{Proc. Interspeech}, 2022.
+
+\bibitem{diener2023plcmos} L. Diener, M. Purin, S. Sootla, A. Saabas, R. Aichner, and R. Cutler, ``PLCMOS -- A data-driven non-intrusive metric for the evaluation of packet loss concealment algorithms,'' in \emph{Proc. Interspeech}, 2023, pp. 2533--2537.
+
+\end{thebibliography}
+
+\end{document}

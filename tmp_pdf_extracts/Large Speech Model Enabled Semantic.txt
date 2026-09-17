@@ -1,0 +1,309 @@
+--- PAGE 1 ---
+1
+Large Speech Model Enabled Semantic
+Communication
+Yun Tian, Zhijin Qin,Senior Member , IEEE,Guocheng Lv,
+Ye Jin, Kaibin Huang,Fellow, IEEE,and Zhu Han,Fellow, IEEE
+Abstract—Existing speech semantic communication systems
+mainly based on Joint Source-Channel Coding (JSCC) archi-
+tectures have demonstrated impressive performance, but their
+effectiveness remains limited by model structures specifically de-
+signed for particular tasks and datasets. Recent advances indicate
+that generative large models pre-trained on massive datasets,
+can achieve outstanding performance arexhibit exceptional per-
+formance across diverse downstream tasks with minimal fine-
+tuning. To exploit the rich semantic knowledge embedded in large
+models and enable adaptive transmission over lossy channels,
+we propose a Large Speech Model enabled Semantic Commu-
+nication (LargeSC) system. Simultaneously achieving adaptive
+compression and robust transmission over lossy channels remains
+challenging, requiring trade-offs among compression efficiency,
+speech quality, and latency. In this work, we employ the Mimi as
+a speech codec, converting speech into discrete tokens compatible
+with existing network architectures. We propose an adaptive
+controller module that enables adaptive transmission and in-
+band Unequal Error Protection (UEP), dynamically adjusting
+to both speech content and packet loss probability under band-
+width constraints. Additionally, we employ Low-Rank Adaptation
+(LoRA) to finetune the Moshi foundation model for generative
+recovery of lost speech tokens. Simulation results show that the
+proposed system supports bandwidths ranging from 550 bps to
+2.06 kbps, outperforms conventional baselines in speech quality
+under high packet loss rates and achieves an end-to-end latency
+of approximately 460 ms, thereby demonstrating its potential for
+real-time deployment.
+Index Terms—Semantic Communication, large model, adaptive
+compression, unequal error protection.
+I. INTRODUCTION
+Driven by recent advances in Artificial Intelligence (AI) and
+the increasing demand for intelligent next-generation com-
+munication systems, semantic communication has attracted
+significant attention. Semantic communication aims to ensure
+This work is supported by the National Key Research and Development
+Program of China under Grant No. 2023YFB2904300, the National Natural
+Science Foundation of China under Grant No. 62293484, and Beijing Natural
+Science Foundation (F251001).(Corresponding author: Zhijin Qin.)
+Yun Tian, Guocheng Lv and Ye Jin are with the School of Electronics,
+Peking University, Beijing 100091, China. (email: tianyun@stu.pku.edu.cn;
+lv.guocheng@pku.edu.cn; jinye@pku.edu.cn).
+Zhijin Qin is with the Department of Electronic Engineering, Tsinghua
+University, Beijing 100084, China, andv with the State Key Laboratory
+of Space Network and Communications, Beijing, 100084, China. (email:
+qinzhijin@tsinghua.edu.cn).
+Kaibin Huang is with the Department of Electrical and Electronic En-
+gineering, The University of Hong Kong, Hong Kong SAR, China (email:
+huangkb@hku.hk).
+Z. Han is with the Department of Electrical and Computer Engineering
+at the University of Houston, Houston, TX 77004 USA, and also with the
+Department of Computer Science and Engineering, Kyung Hee University,
+Seoul, South Korea, 446-701 (email: hanzhu22@gmail.com).
+accurate semantic delivery rather than pursuing bit-level pre-
+cise communication [1], [2]. Semantic communication systems
+exploit the feature extraction and generative capabilities of
+AI models to convey the underlying semantics of the source,
+thereby enhancing communication efficiency through the in-
+tegration of computational resources [3]. However, existing
+semantic communication systems are often constrained by
+their reliance on specific datasets or tasks, requiring costly
+model redesign or retraining for new application. In contrast
+to task-specific semantic communication systems, semantic
+communication systems employing large pre-trained models
+exhibit superior performance across diverse tasks through
+minimal fine-tuning. Motivated by the remarkable performance
+of large language models (LLMs) (e.g., ChatGPT [4] and
+DeepSeek [5]) and image generative models (e.g., Stable
+Diffusion [6]), recent studies have explored the use of large
+models to enhance semantic communication, particularly in
+text and image transmission [7], [8], [9]. Despite this progress,
+the application of large models in adaptive low-bitrate speech
+transmission remains underexplored, and yet holds significant
+potential for enabling robust and efficient speech communica-
+tion over bandwidth-constrained and packet loss channels.
+A. Piror Work
+The primary objective of existing speech semantic com-
+munication systems is to extract speech-relevant features for
+bandwidth compression while ensuring robust transmission
+over various channels. Current end-to-end speech semantic
+communication systems can be categorized based on the type
+of transmitted semantic features: text-related and acoustics-
+related. Transmitting text-related semantic features enables
+ultra-low bitrate communication while preserving the seman-
+tic fidelity of speech through generative reconstruction at
+the receiver. DeepSC-ST [10] transmits speech recognition-
+related features to enable speech synthesis at the receiver.
+However, transmitting only linguistic features is insufficient
+for high-fidelity reconstruction. In [11], additional speech
+related information for duration, pitch, and power are di-
+rectly transmitted to guide the speech synthesis. In SyncSC
+[12], visual information is leveraged to guide the generation
+of prosodic attributes such as duration and pauses, thereby
+enhancing the realism and expressiveness of the synthesized
+speech. Although the transmission of text-related features
+enables significant bandwidth compression, the synthesized
+speech often suffers from low quality and synchronization
+challenges. These approaches struggle to retain rich prosodic
+arXiv:2512.04711v1  [cs.SD]  4 Dec 2025
+--- PAGE 2 ---
+2
+and paralinguistic information, such as pauses and emotions.
+Moreover, the two-stage process of speech-to-text and text-
+to-speech conversion typically incurs delays on the order of
+seconds, which severely limits their applicability in real-time
+communication scenarios.
+An alternative approach transmits acoustic features through
+autoencoder-structured Deep Neural Networks (DNNs) for
+speech compression and reconstruction. In DeepSC-S [13], a
+semantic-channel coder with an attention mechanism is jointly
+optimized for time-domain speech signals. A low-complexity,
+fully convolutional semantic coder is proposed in [14], while
+DeepSC-TS [15] transmits multi-level semantic features to
+improve speech quality. However, the high dimensionality of
+multi-channel floating-point features generated by convolu-
+tional networks hinders bitrate reduction, and the large coding
+window introduces additional latency. For digital semantic
+transmission, Soundspring [16] addresses these issues by
+compressing audio into quantized discrete tokens, enabling
+lower bitrates and compatibility with existing communication
+systems. Inspired by this, our proposed system adopts discrete
+speech tokens to represent speech semantics, enabling adaptive
+compression and in-band unequal error protection based on
+content and channel conditions. By integrating a large pre-
+trained speech model, the system enhances semantic repre-
+sentation and generative reconstruction, is designed with the
+goal of supporting real-time communication scenarios under
+lossy and bandwidth-constrained conditions.
+Improving the robustness of speech transmission over unre-
+liable channels is essential for semantic communication. Chan-
+nel coding or error control techniques improve the transmis-
+sion robustness of speech in various channels. In real-time sce-
+narios, Forward Error Correction (FEC) is generally preferred
+over retransmission due to its lower Round-Trip Time (RTT).
+Traditional FEC schemes based on linear block codes, such as
+Reed-Solomon (RS) codes, can achieve reliable performance
+under low error rates. However, their effectiveness significantly
+degrades under low signal-to-noise ratio (SNR) or high packet
+loss conditions. In addition, these methods require a careful
+balance between redundancy rate and available bandwidth un-
+der varying channel conditions. Recent advances in JSCC offer
+improved resilience to channel noise, especially under low-
+SNR conditions. By jointly optimizing semantic-channel cod-
+ing, these methods can better maintain end-to-end performance
+in challenging environments. Over [10], [13], linear layers
+are used as a channel coder to transform the dimensionality
+of semantic features, enabling joint training under varying
+physical-layer SNR conditions. However, integrating analog
+semantic signals with existing digital communication systems
+remains challenging. To address this issue, digital semantic
+communication is proposed based on modulation and quanti-
+zation of semantic symbols. On the modulation side, [17], [18]
+incorporate digital modulation into semantic communication
+by mapping semantic symbols onto constellation points. [19]
+proposes a trainable multi-order and variable-rate modulation
+scheme compatible with conventional digital transmission. In
+addition, [20] develops a channel-adaptive JSCC framework
+that employs ternary robust demodulation and adaptive mod-
+ulation to preserve task performance with reduced latency.
+For the quantization of semantic features, VQ-DeepSC [21]
+employs multi-scale vector quantization to map semantic fea-
+tures into discrete codebook indices for bit-level transmission.
+[22] proposes a learned nonlinear quantization mechanism
+that narrows the performance gap between digital semantic
+communication and analog JSCC. [23] presents a semantic
+digital–analog converter enabling bidirectional transformation
+between semantic features and digital bits. [24] further de-
+velops a residual vector quantization GAN framework for
+low-bitrate digital semantic communication. However, most
+existing studies focus on robustness at the physical layer under
+varying SNR conditions, while packet-level optimization at
+higher layers has been relatively underexplored.
+To improve robustness under packet loss channel, [12]
+proposes a packet-level coding method for video semantics.
+Another line of work focuses on packet loss concealment,
+where loss-resilient semantic representations are transmitted
+and the receiver performs predictive recovery. In this context,
+the packet loss problem is modeled as a masked language mod-
+eling task. A bidirectional Transformer encoder is employed
+to recover lost words in [12], and to predict lost audio tokens
+in [16]. However, these approaches face challenges in real-
+time communication scenarios. The bidirectional transformer
+relies on both past and future context, which introduces latency
+and makes it less suitable for streaming applications. To
+address this limitation, we propose an packet loss concealment
+method based on a large pre-trained speech model with an
+autoregressive structure. By depending only on past received
+packets, it is inherently better suited for real-time applications.
+Large AI models have demonstrated strong potential in
+semantic communication systems. Most existing large AI
+models are generative models with autoregressive structures,
+trained on massive datasets. These models have attracted
+increasing attention due to their strong contextual understand-
+ing, generation capabilities, and state-of-the-art performance
+across a wide range of downstream tasks [25]. In semantic
+communication, large model enhanced systems typically lever-
+age these capabilities to improve transmission performance
+and reduce bandwidth overhead. For instance, a privacy-
+preserving semantic communication framework using multi-
+modal LLMs is proposed in [26], where text serves as a
+unified representation to protect sensitive information through
+few-shot learning. An end-to-end text transmission system
+is proposed in [7], incorporating an LLM-based semantic
+decoder. For image transmission, SAMSC [8] applies the
+Segment Anything Model (SAM) to partition images into
+semantic regions, reducing communication overhead. LSC [9]
+proposes a language-guided semantic framework that enhances
+robustness over noisy channels by leveraging heterogeneous
+Text2Image and Image2Text knowledge. However, existing
+studies primarily focus on language and vision modalities, with
+limited exploration of speech as a source. The integration of
+large models for speech semantic communication remains an
+open and promising direction.
+B. Motivation and Contributions
+Despite the rapid development of large language and vision
+models in semantic communication, existing speech semantic
+--- PAGE 3 ---
+3
+Fig. 1: The proposed framework of large speech model enabled semantic communication system.
+communication systems rarely exploit the generative capa-
+bilities of large pre-trained models. To address this gap,
+we propose a speech semantic communication framework
+enhanced by a large model, LargeSC, which represents speech
+using discrete tokens to enable low-bitrate transmission and
+formulates packet loss concealment as a masked token predic-
+tion task. The system integrates adaptive compression and ro-
+bust transmission strategies to balance compression efficiency,
+reconstruction quality, and resilience to packet loss in real-
+time communication and lossy channel. At the transmitter,
+an adaptive compression and in-band unequal error protection
+strategy is applied based on both channel status and target
+bandwidth. At the receiver, built upon an autoregressive large
+speech model, LargeSC performs packet loss concealment.
+The main contributions are as follows:
+1)Semantic-aware adaptive compression:We develop an
+extended version of the pre-trained Mimi model to serve
+as the semantic coder for 24 kHz speech, supporting
+variable bitrates from 550 bps to 2.06 kbps at a 12.5 ms
+frame rate.
+2)Loss-aware in-band unequal error protection:We
+design an adaptive controller module that dynamically
+adjusts semantic compression based on speech content
+importance and channel conditions. The module allo-
+cates bandwidth efficiently while applying enhanced
+protection to critical tokens under lossy networks.
+3)Real-time transmission capability:Leveraging the au-
+toregressive structure of the large model, our system
+performs causal packet loss concealment at the receiver.
+This results in an end-to-end latency of approximately
+460 ms, demonstrating potential for real-time commu-
+nication scenarios.
+C. Organization
+The rest of this paper is organized as follows. The frame-
+work of large speech model enabled semantic communication
+system is introduced in Section II. Section III describes the
+details of the proposed model. The simulation results are
+presented in Section IV. Section V discusses potential appli-
+cations, limitations, and future challenges. Finally, Section VI
+concludes the paper.
+II. SYSTEMMODEL
+In this section, we introduce the system model of the pro-
+posed LargeSC, as illuistrated in Fig. 1. The speech coder, built
+upon the Mimi [27] model, performs the conversion between
+speech signals and discrete tokens. An adaptive controller
+module is designed to perform semantic-aware compression
+and in-band unequal error protection, dynamically adjusting
+transmission according to token importance and channel con-
+ditions. The large speech model, Moshi [27] is employed at the
+receiver to predict lost packets through generative inference.
+A. Semantic Encoder
+In the proposed system, the speech transmission task is
+reformulated as a token-level transmission problem. The input
+of the semantic encoder is speech chunks in time domain,
+denoted asS= [s 1, s2, ..., sn, .., sN], whereNis the total
+number of speech frames. For real-time speech transmission,
+each speech chunks n is encoded intoN Q tokens by the
+semantic encoder, which can be represented as
+xn =Encoder(s n),(1)
+where the tokenx n = [xn1 , xn2 , ..., xnNQ
+]refers to the index
+set of quantized speech feature representations in the code-
+book. We adopt Mimi as the speech codec, configured with
+NQ codebooks. The encoder of Mimi consists of convolutional
+layers and transformer blocks that extract a latent feature
+vectorz n from the input speech chunks n. This latent feature
+is then quantized using Residual Vector Quantization (RVQ) to
+produce the quantized representationz qn. RVQ quantizes the
+latent vectorz qn in a multi-stage recursive manner. At stage
+i, the residual is defined as:
+ri,n =
+(
+zn, i= 1,
+ri−1,n −Q i−1(ri−1,n), i≥2.
+(2)
+whereQ i(·)denotes thei-th quantizer. Each residual repre-
+sents the reconstruction error after subtracting the contribu-
+tions of all previous quantizers. The final quantized represen-
+tation is computed by accumulating the outputs of all RVQ
+stages:
+zqn =
+NqX
+i=1
+Qi(ri,n).(3)

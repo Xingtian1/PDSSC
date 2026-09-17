@@ -1,0 +1,216 @@
+--- PAGE 1 ---
+Published as a conference paper at ICLR 2024
+SPEECH TOKENIZER : U NIFIED SPEECH TOKENIZER FOR
+SPEECH LANGUAGE MODELS
+Xin Zhang∗, Dong Zhang ∗, Shimin Li, Yaqian Zhou †, Xipeng Qiu †
+School of Computer Science, Fudan University
+Shanghai Key Laboratory of Intelligent Information Processing, Fudan University
+{xin_zhang22,dongzhang22}@m.fudan.edu.cn
+{smli20,zhouyaqian,xpqiu}@fudan.edu.cn
+https://0nutation.github.io/SpeechTokenizer.github.io/
+ABSTRACT
+Current speech large language models build upon discrete speech representations,
+which can be categorized into semantic tokens and acoustic tokens. However,
+existing speech tokens are not specifically designed for speech language mod-
+eling. To assess the suitability of speech tokens for building speech language
+models, we established the first benchmark, SLMTokBench. Our results indicate
+that neither semantic nor acoustic tokens are ideal for this purpose. Therefore, we
+propose SpeechTokenizer, a unified speech tokenizer for speech large language
+models. SpeechTokenizer adopts the Encoder-Decoder architecture with residual
+vector quantization (RVQ). Unifying semantic and acoustic tokens, SpeechTok-
+enizer disentangles different aspects of speech information hierarchically across
+different RVQ layers. Furthermore, We construct a Unified Speech Language
+Model (USLM) leveraging SpeechTokenizer. Experiments show that SpeechTok-
+enizer performs comparably to EnCodec in speech reconstruction and demonstrates
+strong performance on the SLMTokBench benchmark. Also, USLM outperforms
+V ALL-E in zero-shot Text-to-Speech tasks. Code and models are available at
+https://github.com/ZhangXInFD/SpeechTokenizer/.
+1 I NTRODUCTION
+Large language models (OpenAI, 2023; Touvron et al., 2023) have demonstrated remarkable per-
+formance on various natural language processing tasks. This has inspired numerous works to build
+speech language models (Borsos et al., 2022), which have achieved significant breakthroughs across
+various speech processing tasks (Wang et al., 2023; Zhang et al., 2023; Rubenstein et al., 2023;
+Dong et al., 2023). A key commonality among these works is the utilization of discrete speech
+representations. Current discrete speech representations can be categorized into two types: semantic
+tokens and acoustic tokens (Borsos et al., 2022). Semantic tokens are typically from self-supervised
+pre-trained models with masked language modeling as training objective (Hsu et al., 2021; Baevski
+et al., 2020; Chung et al., 2021). Derived through k-means clustering on representations from a
+specific intermediate layer, semantic tokens are depicted as sequences with one-dimensional structure.
+Acoustic tokens can be extracted from neural audio codecs with reconstruction as training objec-
+tive (Zeghidour et al., 2021; Défossez et al., 2022). Utilizing residual vector quantization (RVQ) with
+hierarchical quantizers for discretization, acoustic tokens are represented as matrices consisting of
+two dimensions: timesteps and quantizers.
+Building upon two speech tokens, there exist three modeling approaches for speech language models,
+as listed in Table 1: i) Semantic language models are constructed using semantic tokens and employ
+an external unit vocoder for speech synthesis. (Lakhotia et al., 2021; Zhang et al., 2023; Hassid
+et al., 2023). While capturing semantically accurate content, their speech generation results in poor
+∗Equal contribution. Order is random
+†Corresponding author
+1
+arXiv:2308.16692v2  [cs.CL]  23 Jan 2024
+--- PAGE 2 ---
+Published as a conference paper at ICLR 2024
+AR
+NAR concat
+Decoder
+T
+Q
+HuBERT
+W2VBERT
+...
+SoundStream
+Encodec
+...
+SpeechTokenizer
+Content Timbre, ...
+Semantic tokensAcoustic tokens Unified tokens
+Q
+T
+Q
+T
+Content, Timbre, ...
+(a) Different Speech Tokens (b) Unified Speech Language Model
+Figure 1: Left: Illustration of information composition of different discrete speech representations.
+Right: Illustration of unified speech language models. AR refers to autoregressive and NAR refers to
+non-autoregressive. Speech tokens are represented as colored circles and different colors represent
+different information.
+Accurate ContentHigh-quality SpeechSingle Tokenzier
+Semantic LM √ × √
+Acoustic LM × √ √
+Hierarchical LM√ √ ×USLM (ours) √ √ √
+Table 1: Comparision between different speech language models. Semantic LM refers to semantic
+language models. Acoustic LM refers to acoustic language models. Hierarchical LM refers to
+hierarchical speech language models. USLM refers to our unified speech language model.
+quality and a loss of acoustic details. ii) Acoustic language models are built on acoustic tokens.
+Taking V ALL-E (Wang et al., 2023) as an example, despite achieving impressive zero-shot text-to-
+speech (TTS) capabilities, it still suffers from problems like inaccurate content, due to the complex
+information within acoustic tokens. iii) Hierarchical speech language models comprise semantic
+token language models and acoustic token language models, which capture content information and
+acoustic details respectively (Borsos et al., 2022; Rubenstein et al., 2023; Dong et al., 2023). This
+structure shows promising results in both content and speech quality, but the multi-stage modeling
+approach is more complex, leading to several drawbacks such as error accumulation and slower
+processing speed. Additionally, there is significant information redundancy between semantic tokens
+and acoustic tokens, which introduces unnecessary modeling complexities. An ideal speech language
+model should not only accurately model content, but also generating diverse, high-quality speech,
+while maintaining an architecture of elegant simplicity. Correspondingly, ideal speech tokens should
+meet the following two key characteristics: i) Strong alignment with text; ii) Effective preservation of
+speech information.
+However, existing speech tokens are not explicitly designed for speech language modeling, and there
+has been no exploration into their suitability for building speech language models. To address this
+gap, we build Speech Language Model Token Benchmark, to assess the suitability of speech tokens
+for constructing speech language models. Our evaluation reveals that semantic tokens exhibit a
+high alignment with text while losing some information in speech, such as timbre. Acoustic tokens
+excel in preserving speech information effectively but do not demonstrate a strong alignment with
+text. With these observations, we aim to build a specialized speech tokens designed for speech
+language models by unifying semantic and acoustic tokens. Specifically, we can conduct information
+disentanglement in the RVQ structure of acoustic tokens, enabling the first RVQ quantizer to generate
+tokens containing content information, similar to semantic tokens, while the subsequent quantizers
+complement the remaining paralinguistic information, as illustrated in Figure 1.
+With the above motivation, we propose SpeechTokenizer, a unified speech tokenizer for speech large
+language models. SpeechTokenizer adopts the Encoder-Decoder architecture with residual vector
+quantization. Unifying semantic and acoustic tokens, SpeechTokenizer disentangles different aspects
+of speech information hierarchically across different RVQ layers. By employing a semantic teacher to
+guide the first RVQ quantizer, the first layer tokens can effectively capture content information. With
+residual structure, the subsequent quantizers complement the remaining paralinguistic information.
+2
+--- PAGE 3 ---
+Published as a conference paper at ICLR 2024
+Building upon SpeechTokenizer, we build aUnified Speech Language Model consisting of autore-
+gressive and non-autoregressive models. Experimental results show that SpeechTokenizer performs
+comparably to EnCodec (Défossez et al., 2022) in speech reconstruction and demonstrates strong
+performance on the SLMTokBench benchmark. The USLM notably outperforms V ALL-E (Wang
+et al., 2023) in zero-shot Text-to-Speech (TTS) tasks.
+Our contributions include the following:
+• We propose SpeechTokenizer, which is specially designed for speech large language models
+and unify the semantic and acoustic tokens through disentangling different aspects of speech
+information hierarchically.
+• We establish SLMTokBench, the first benckmark to assess the suitability of speech tokens for
+constructing speech language models.
+• We construct a unified speech language model based on SpeechTokenizer, which outperforms
+V ALL-E on zero-shot TTS task.
+2 SLMT OKBENCH : S PEECH LANGUAGE MODEL TOKEN BENCHMARK
+To build powerful speech language models, discrete speech representations should possess the fol-
+lowing two key characteristics: i) Strong alignment with text; ii) Effective preservation of speech
+information. Building on this premise, we establish speech Language Model Token Benchmark (SLM-
+TokBench) to assess the suitability of speech tokens for constructing speech language models.
+2.1 T EXT ALIGNMENT EVALUATION
+We evaluate the degree of text alignment by estimating the mutual information between speech tokens
+and text. For notation, X denotes discrete speech representations; Y denotes text; I(X; Y) denotes
+the mutual information; test dataset is denoted as D = {(xi, yi)}N
+i=1 and θ denotes the downstream
+model. Through the derivation in Appendix A, we can estimate I(X; Y) as:
+ˆI(X; Y) = 1
+N 2
+NX
+i=1
+NX
+j=1
+[log qθ(yi|xi) − log qθ(yj|xi)]
+where qθ(Y|X) is the variational distribution and can be parameterized by the downstream model θ.
+The downstream model is a vanilla 2-layer 1024-unit BLSTM optimized by CTC loss on characters
+and it takes speech tokens as inputs. Specifically, for each discrete representation, we first establish
+an embedding matrix, which can be either randomly initialized or derived from the k-means centroid
+matrix or vector quantization codebooks obtained during the discretization process. We use the
+embedding matrix to embed the discrete representations and obtain continuous representations, which
+are then fed into the downstream models. We train the downstream model on LibriSpeech train-clean-
+100 subset and use dev-clean subset for estimating mutual information. We also calculate the word
+error rate (WER) on the test set. For downstream model training, we configure the training setup with
+a batch size of 32, a learning rate of 1e-4, and a total of 200k global steps.
+2.2 I NFORMATION PRESERVATION EVALUATION
+To evaluate the preservation of speech information in discrete speech representations, we convert
+speech tokens back to speech and evaluate resynthesized speech by automatic metrics on content and
+timbre. We train a unit-HiFIGAN (Polyak et al., 2021) on LibriSpeech dataset to convert HuBERT
+units to waveform. Notably, to avoid interference from additional information, we don’t supply
+any speaker information during training. For Encodec tokens, we used the Encodec decoder to
+directly produce the waveform. Content preservation is evaluated by computing the WER through
+transcribing the resynthesized speech using the Whisper en-medium model (Radford et al., 2023).
+Timbre preservation is evaluated by utilizing WavLM-TDNN (Chen et al., 2022) to calculate speaker
+similarity between the synthesized and groundtruth speech. We randomly sample 300 speech samples
+from LibriSpeech test set for evaluation.
+3
+--- PAGE 4 ---
+Published as a conference paper at ICLR 2024
+Encoder
+VQ1
+VQ2
+VQ8...
+Decoder
+HuBERT
+    Semantic Distillation
+Discriminator
+Quantizer
+Teacher
+Student
+module for training only  
+dataflow in training only 
+Figure 2: Illustration of SpeechTokenizer framework.
+2.3 C OMPARING SEMANTIC & ACOUSTIC TOKENS
+We use HuBERT L9 units to represent semantic tokens and EnCodec codes to represent acoustic
+tokens. As shown in Table 3, semantic tokens achieve high mutual information with text but their
+resynthesized speech has low speaker similarity. Acoustic tokens achieve low WER and high speaker
+similarity for resynthesized speech but have low mutual information with text.
+3 S PEECH TOKENIZER
+3.1 M ODEL STRUCTURE
+Our model is built on the framework of RVQ-GANs, following the same pattern as Sound-
+Stream(Zeghidour et al., 2021) and EnCodec(Défossez et al., 2022). As depicted in Figure2, our
+model uses the convolutional-based encoder-decoder network from EnCodec, which performs tem-
+poral downscaling with a chosen striding factor. Notably, we have substituted the two-layer LSTM,
+originally following the convolution blocks in the EnCodec encoder, with a two-layer BiLSTM
+to augment the semantic modeling ability. We conduct ablation studies of model structure in Ap-
+pendix B. We quantize the encoder outputs using Residual Vector Quantization (RVQ), a method that
+can operate quantizes residuals following an initial quantization steps with distinct codebook. Further
+details of model structure can be found in Appendix D. During training, a semantic teacher provides
+semantic representation to guide the residual quantization process.
+3.2 S EMANTIC DISTILLATION
+To achieve a hierarchical modeling of diverse information across different RVQ layers, we employ
+semantic guidance for the first quantizer, enabling it to capture content information. Leveraging
+a residual structure enables the subsequent quantizers to complement the remaining paralinguistic
+information.
+We employ HuBERT (Hsu et al., 2021) as our semantic teacher in this study, as HuBERT is demon-
+strated to encompass substantial content information (Mohamed et al., 2022). We introduce two types
+of distillation: continuous representation distillation and pseudo-label prediction.
+For continuous representation distillation, we employ the 9th layer HuBERT representation or the
+average representation across all HuBERT layers as semantic teachers. The training objective is to
+maximize the cosine similarity at the dimension level across all timesteps between the outputs of
+RVQ first layer and semantic teacher representations. Formally, the continuous distillation loss is
+4

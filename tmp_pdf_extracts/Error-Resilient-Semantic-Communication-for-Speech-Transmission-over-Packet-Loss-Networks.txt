@@ -1,0 +1,346 @@
+--- PAGE 1 ---
+1
+Error-Resilient Semantic Communication for
+Speech Transmission over Packet-Loss Networks
+Zhuohang Han, Jincheng Dai,Member, IEEE, Shengshi Yao,Member, IEEE, Junyi Wang,Member, IEEE, Yanlong
+Li,Member, IEEE, Kai Niu,Member, IEEE, Wenjun Xu,Senior Member, IEEE, and Ping Zhang,Fellow, IEEE
+Abstract—Real-time speech communication over wireless net-
+works remains challenging, as conventional channel protection
+mechanisms cannot effectively counter packet loss under strin-
+gent bandwidth and latency constraints. Semantic communica-
+tion has emerged as a promising paradigm for enhancing the
+robustness of speech transmission by means of joint source-
+channel coding (JSCC). However, its cross-layer design hinders
+practical deployment due to the incompatibility with existing
+digital communication systems. In this case, the robustness of
+speech communication is consequently evaluated primarily by
+the error-resilience to packet loss over wireless networks. To
+address these challenges, we proposeGlaris, a generative latent-
+prior-based resilient speech semantic communication framework
+that performs resilient speech coding in the generative la-
+tent space. Generative latent priors enable high-quality packet
+loss concealment (PLC) at the receiver side, well-balancing
+semantic consistency and reconstruction fidelity. Additionally, an
+integrated error resilience mechanism is designed to mitigate
+the error propagation and improve the effectiveness of PLC.
+Compared with traditional packet-level forward error correction
+(FEC) strategies, our new method achieves enhanced robustness
+over dynamic wireless networks while reducing redundancy
+overhead significantly. Experimental results on the LibriSpeech
+dataset demonstrate thatGlarisconsistently outperforms existing
+error-resilient codecs, achieving JSCC-level robustness while
+maintaining seamless compatibility with existing systems, and it
+also strikes a favorable balance between transmission efficiency
+and speech reconstruction quality.
+Index Terms—Semantic communication, neural speech coding,
+packet loss concealment, forward error correction, efficient re-
+dundancy.
+I. INTRODUCTION
+R
+EAL-TIME speech communication has become a corner-
+stone of modern digital services, including cloud-native
+4G/5G voice calls, online meetings, cloud-gaming voice chat,
+and voice-enabled edge applications. These latency-sensitive
+scenarios demand stringent end-to-end delay guarantees and
+robustness against packet loss, as the quality of experience is
+highly sensitive to latency, jitter, and loss [1]. Retransmission-
+based recovery, though effective in non-real-time data applica-
+tions, is infeasible for interactive speech, because the round-
+trip delay of automatic repeat request mechanisms typically
+This work was supported in part by the National Key Research and
+Development Program of China under Grant 2024YFF0509700; in part by the
+National Natural Science Foundation of China under Grant 62371063, Grant
+62321001, and Grant 62501075; in part by the Beijing Municipal Natural
+Science Foundation under Grant L232047; and in part by the Beijing Nova
+Program.
+Zhuohang Han, Jincheng Dai, Shengshi Yao, Kai Niu, Wenjun Xu, and Ping
+Zhang are with Beijing University of Posts and Telecommunications, Beijing,
+China. Junyi Wang and Yanlong Li are with the Academy of Information and
+Communication, Guilin University of Electronic Technology, Guangxi, China.
+exceeds acceptable conversational latency budget [2]. Hence,
+achieving reliability within one-shot transmission remains a
+key challenge for real-time speech communication systems.
+Semantic communication has recently emerged as a promis-
+ing paradigm to address this challenge by enabling more
+robust communication under unreliable channels [3]. Semantic
+communication systems often use joint source-channel coding
+(JSCC) to extract and transmit high-level semantic represen-
+tations across modalities such as text [4], images [5]–[7],
+speech [8], and video [9]. However, this cross-layer design
+makes them incompatible with standard protocol stacks and
+existing modulation and coding schemes, limiting deployabil-
+ity. Additionally, JSCC is typically trained for specific channel
+conditions, which hinders its adaptation to dynamic wireless
+environments without compromising performance. To address
+these challenges, we revisit semantic communication as a
+joint optimization problem of source compression and network
+transmission, aiming to achieve JSCC-level robustness over
+packet-loss networks using traditional physical-layer transmis-
+sion. This is nontrivial, as packet loss removes entire packets
+rather than corrupting individual symbols, resulting in com-
+plete information loss and making error recovery significantly
+more difficult than physical-layer impairments.
+To address this problem, we draw inspiration from tradi-
+tional error-resilience mechanisms above the network layer,
+which can be broadly categorized into sender-based forward
+error correction (FEC) and receiver-based packet loss conceal-
+ment (PLC). Sender-based FEC introduces controlled redun-
+dancy to enable packet recovery without retransmission, as in
+out-of-band FEC (e.g., Reed-Solomon, fountain codes [10],
+[11]), redundant encoding [12], and codec-specific in-band re-
+dundancy (e.g., Opus LBRR [13]). RFC8854 [14] recommends
+the use of in-band FEC when available, and out-of-band FEC
+is therefore beyond the scope of this work. Nevertheless, in-
+band FEC like LBRR provides only single-frame protection
+and is ineffective against burst or consecutive losses. Hence,
+receiver-based PLC is often employed as a complementary
+approach, which can be categorized as heuristic or neural.
+Traditional PLC relies on waveform repetition or spectral
+interpolation [2], while neural PLC employs deep generative
+models [15]–[19] to reconstruct lost segments. Despite recent
+progress in neural PLCs, two main limitations remain: (i) each
+frame must be independently decodable to provide context
+for loss prediction, which prevents the use of entropy cod-
+ing, thereby limiting compression efficiency; and (ii) limited
+inter-frame correlation restricts the achievable reconstruction
+performance under severe or burst packet loss.
+arXiv:2512.08203v1  [cs.SD]  9 Dec 2025
+--- PAGE 2 ---
+2
+In this paper, we propose a standard-compatible semantic
+communication framework that integrates sender-based in-
+band FEC and receiver-based PLC into codec design, aimed
+at ensuring robust speech transmission over packet-loss net-
+works. Our goal is to improve reconstruction quality under
+severe or burst losses for PLC, while reducing redundancy
+overhead and increasing robustness to dynamic channel condi-
+tions for in-band FEC. However, designing such a framework
+presents two primary challenges.
+The first challenge is maintaining semantic consistency
+in concealed speech under packet loss for PLC. Existing
+approaches [15]–[19] primarily focus on fine-grained acoustic
+details but fail to model long-range dependencies in a single-
+stage framework. Due to strong local correlations in speech,
+these methods tend to over-rely on short-term cues, which
+results in degraded phoneme and word-level coherence. To
+address this issue, we introduce generative latent priors as a
+regularization mechanism to guide the learning of long-range
+dependencies, thereby enhancing perceptual naturalness.
+The second challenge lies in balancing compression effi-
+ciency with error resilience. It requires efficient in-band FEC
+design and methods to suppress error propagation in entropy-
+coded streams, enabling the use of entropy coding for high-
+efficiency compression under packet-loss conditions. While
+compression minimizes redundancy to improve efficiency,
+error resilience depends on redundancy for recovery, resulting
+in an intrinsic trade-off between compression efficiency and
+robustness. This trade-off is pronounced in entropy-coded
+streams, where symbol dependencies can cause cascading
+errors. To address this, we reuse hyperprior-derived side infor-
+mation as in-band FEC to provide redundancy for both entropy
+decoding and PLC, thereby suppressing error propagation and
+improving reconstruction fidelity under packet loss.
+Recent advances in image compression [20], [21] have
+adapted a tokenization and compression architecture and have
+achieved remarkable rate-distortion (RD) results. Inspired by
+this, we proposeGlaris, aGenerativeLatent-prior-based
+ResilientSpeech semantic communication framework, which
+leverages generative latent priors within a two-stage coding
+architecture to achieve error-resilient speech transmission. In
+the first stage, a VQ-V AE preserves fine-grained acoustic
+details, enabling faithful reconstruction. In the second stage,
+error-resilient transform coding with latent-prior modeling
+captures long-range dependencies, enhancing both semantic
+consistency and reconstruction fidelity. The hyperprior serves
+as a compact and effective redundancy, functioning as in-
+band FEC to: (i) guide PLC via high-level contextual cues,
+(ii) suppress entropy decoding errors, and (iii) minimize
+bitrate overhead by encoding latent distributions rather than
+raw features. These generative latent priors, encompassing
+both latent-space priors and hyperpriors, form the foundation
+ofGlaris, enabling improved semantic consistency and a
+favorable balance between compression efficiency and error
+resilience under burst losses.
+We evaluateGlarison the LibriSpeech dataset across di-
+verse packet-loss conditions, including independent and iden-
+tically distributed (i.i.d.) random losses, three-state Markov
+channels [22], actual traces from PLC challenge dataset [23],
+and COST2100 wireless channels. Experimental results
+demonstrate thatGlarisachieves strong robustness against
+high loss rates and long bursts, achieving a favorable balance
+between compression efficiency and resilience compared with
+both separation-based and JSCC-based baselines. Subjective
+listening tests further confirm the perceptual benefits and
+practical applicability of the proposed framework. Moreover,
+real-time factor (RTF) evaluations demonstrate thatGlaris
+supports real-time streaming inference, making it suitable for
+deployment in real-world speech communication systems.
+Our key contributions are summarized as follows:
+1)Standard-Compatible Semantic Communication Frame-
+work:We proposeGlaris, an error-resilient seman-
+tic communication framework for speech transmission
+over packet-loss networks, which performs error-resilient
+transform coding in the generative latent space of a VQ-
+V AE to achieve semantic consistency and high recon-
+struction fidelity under packet loss.
+2)Side-Information-Based Error-Resilience Enhancement:
+We design an error resilience mechanism that incor-
+porates side-information-based in-band FEC into PLC
+design to effectively suppress error propagation and guide
+accurate prediction of lost frames.
+3)Controllable Redundancy: Glarisenables adaptive redun-
+dancy control through side information rate and backup
+frame configuration, offering efficient robustness adjust-
+ment under varying channel conditions.
+The remainder of this paper is organized as follows. Sec-
+tion II reviews related studies on neural speech coding and er-
+ror resilience mechanisms. Section III introduces the proposed
+framework, Section IV presents the experimental evaluations,
+and Section V concludes the paper.
+II. RELATEDWORK
+A. Neural Audio/Speech Coding
+Neural audio/speech coding can typically be divided
+into neural vocoders and end-to-end neural coding. Neural
+vocoders based on WaveNet [24] apply neural networks as
+the decoder to decode from traditional handcrafted features
+like spectral envelope, pitch, and voicing level. LPCNet [25]
+further improves efficiency by combining neural modeling
+with linear prediction, achieving real-time speech coding at
+1.6 kbps. To leverage the full potential of neural coding, end-
+to-end neural coding has been introduced to obtain learned
+features. Based on the SENet structure [26] and VQ-V AE
+framework [27], a series of works [28]–[32] have been pro-
+posed. SoundStream [28] trains the model with residual vector
+quantization (RVQ) in an adversarial learning strategy to
+improve the perceptual quality. Based on that, Encodec [29]
+employs an RNN to improve the sequence modeling and trains
+a small transformer to predict the distribution of codewords
+to further improve the compression efficiency. Instead of
+using entropy coding to improve compression efficiency, HiFi-
+Codec [31] and Descript-Audio-Codec (DAC) [32] design the
+new structure of RVQ with a well-designed training strategy
+to improve the utilization of the codebook.
+--- PAGE 3 ---
+3
+However, advancements in the field of learned image com-
+pression [20], [33], [34] face the RD optimization using
+variational methods with scalar quantization (SQ), which is
+rarely explored in neural speech codecs. Several neural speech
+codecs based on SQ have been proposed, but they operate at
+comparatively high bitrates [35], [36]. An SQ-based neural
+speech coding scheme for transmitting redundant information
+in order to increase robustness against transmission errors
+has been proposed by [37]. [38] applies the finite SQ in
+a speech codec to ensure constant packet lengths. However,
+none of the existing neural speech codecs have adopted the
+tokenization and compression architecture proposed in [20],
+which motivates us to introduce this structure in speech coding
+to achieve efficient compression and enhanced error resilience
+through dedicated mechanism design.
+B. Error Resilience Mechanism
+Error resilience mechanisms can be divided into sender-
+based and receiver-based approaches [2]. Sender-based
+mechanisms mainly include retransmission and packet-level
+FEC [10], [11], while retransmission introduces unacceptable
+delay for V oIP and packet-level FEC is difficult to adapt
+to dynamic channel states when optimized for efficiency.
+In this case, receiver-based mechanism PLC plays a more
+important role in V oIP. Traditional PLC methods include zero
+filling, interpolation, and comfortable background noise [2].
+Nowadays, interpolation using a neural network called neural
+PLC has achieved great success, especially for GAN-based
+PLC [15]–[19]. However, as described in FD-PLC [39], post-
+processed PLC is inherently constrained by the decoder.
+DRED [37] follows a similar paradigm, since it introduces
+a neural encoder to encode features of Opus into the low-
+bitrate deep redundancy bitstream, and invokes neural PLC in
+features when redundancy is unavailable. Similar to DRED,
+further works [40]–[42] design deep redundancy schemes
+based on discrete RVQ tokens for neural codecs that perform
+well in the low-bitrate range. In contrast, our work leverages
+the inherent hyperprior of the codec as deep redundancy,
+without introducing any additional encoder or decoder, and
+demonstrates its effectiveness in improving error resilience.
+III. METHODOLOGY
+A. Overview
+Glarisenhances the error resilience of speech communica-
+tion systems by using generative latent priors within a two-
+stage coding framework. As illustrated in the top part of
+Fig. 1, a VQ-V AE first learns a generative latent representation
+that captures high-level semantic information, enabling high-
+fidelity reconstruction. The subsequent error-resilient trans-
+form coding stage then operates on this latent space to achieve
+RD optimization and enhance robustness under packet loss
+conditions. The latent prior is introduced as a regulariza-
+tion loss to enforce sequence-level consistency, whereas the
+hyperprior provides high-level guidance for PLC. Through
+the joint use of prior loss and hyperprior guidance,Glaris
+achieves an effective balance between compression efficiency
+and robustness under unreliable transmission.
+The overall data processing flow is summarized as follows.
+The input speech signalxis encoded into a generative latent
+representationl=E(x)by latent encoderE(·). Next the
+token sequencelis transformed into latent codey=g a(l)
+by the analysis transformg a(·). The latent codeyis scalar-
+quantized toy Q =Q(y), and its quantized symbols are
+entropy coded for transmission over a lossy channelW(·)
+along with the side informationzderived from the hyperprior
+model. At the receiver side, the received latent code ˆyis
+decoded by the synthesis transformg s(·)to reconstruct ˆl, and
+the latent decoderD(·)generates the reconstructed speech ˆx.
+The side informationznot only captures the distribution ofy
+but also provides auxiliary cues for PLC, thereby improving
+both efficiency and robustness. The procedure ofGlariscan
+be summarized as
+x
+E(·)
+− − − →l
+ga(·)
+− − − →y
+Q(·)
+− − − →yQ
+W(·)
+− − − →ˆy
+gs(·)
+− − − →ˆl
+D(·)
+− − − →ˆx.(1)
+To further enhance error resilience, a side-information-based
+error resilience mechanism is designed as illustrated in the
+bottom part of Fig. 1. The key insight is that, for a lost
+framey t, the directly encoded latentz t provides stronger
+correlation and richer reconstruction cues than context frames.
+To ensure reliable reception ofz t, the side information is
+reused as in-band FEC, whose redundancy level can be
+adaptively controlled through the bitrate ofzand backup
+frame configuration. By introducing an offset in backups,
+Glarisachieves robust recovery against long burst losses while
+maintaining compression efficiency.
+B. Two-Stage Coding
+1) Generative Latent Representation:A key challenge in
+learning a high-quality generative latent representation lies in
+constructing a manifold-aligned latent space that preserves
+the acoustic features of speech. In Glaris, this is achieved
+by employing a VQ-V AE [28] as the latent audio encoder-
+decoder pair. The VQ-V AE encodes high-dimensional speech
+representations into a compact latent space, reducing dimen-
+sionality while preserving semantic structure and perceptual
+consistency. This compact space enables tractable latent priors
+that are leveraged during training to enforce global sequence
+consistency. The discrete codebook acts as a variational bot-
+tleneck, enforcing compact and robust latent representations,
+thereby enhancing both compression efficiency and error re-
+silience.
+2) Error-Resilient Latent Transform Coding:A straightfor-
+ward way to compress the token sequencelis the VQ-indices-
+map coding [28]. Although EnCodec [29] improves compres-
+sion efficiency by learning the distribution of discrete indices,
+transform coding enables explicit RD optimization through
+variational modeling, thereby achieving higher compression
+efficiency, as shown in Fig. 7. Building upon this principle,
+Glarisintroduces an error-resilient latent transform coding
+framework to enhance the error resilience while maintaining
+compression efficiency.
+The proposed architecture, illustrated in Fig. 2, employs a
+dual-function entropy model that supports both entropy coding
+and PLC. For each latent framel t, the analysis transformg a(·)

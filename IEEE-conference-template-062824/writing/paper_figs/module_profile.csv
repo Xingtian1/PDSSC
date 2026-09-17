@@ -1,0 +1,7 @@
+module,gflops,params_m,params_k
+Semantic Encoder,58.693632,103.675586,103675.586
+RVQ Codebooks,4.1984,8.388608,8388.608
+Adaptive Controller,1e-05,0.005191,5.191
+Flow Completion Model,11.726094,58.4704,58470.4
+Semantic Decoder,111.255601,103.675586,103675.586
+Total,185.873737,274.215371,274215.371

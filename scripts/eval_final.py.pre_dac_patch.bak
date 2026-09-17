@@ -1,0 +1,1453 @@
+# -*- coding: utf-8 -*-
+"""
+eval_final.py  ─  综合评估脚本（最终版）
+
+Part 1 (rate)    : 码率-质量曲线 (PLR=0%)     指标: VISQoL / UTMOS
+Part 2 (plr)     : PLR-质量曲线               指标: VISQoL / PLCMOS / UTMOS
+Part 3 (ablation): 消融实验 (有/无 Flow)       指标: VISQoL / PLCMOS / UTMOS
+Part 4 (vis)     : 频谱可视化 + t-SNE
+Part 5 (latency) : 模块延迟基准 + 实时性分析
+
+竞品（Part 1 rate，全码率扫描）:
+  - AAC       : 4~24 kbps
+  - Opus      : 6~16 kbps
+  - EnCodec   : 1.5 / 3.0 / 6.0 / 12.0 kbps
+  - ESC       : 2 / 4 / 6 / 8 / 10 / 12 kbps  (1-6 streams, 2kbps/stream)
+  - DAC       : 1.5 / 3.0 / 4.5 / 6.0 / 7.5 / 9.0 kbps  (3-18 codebooks, 0.5kbps/cb)
+
+竞品（Part 2 plr，最接近 1.5k / 3k 的档位）:
+  - EnCodec 1.5k / 3.0k
+  - Opus ~8kbps (inband FEC / LBRR)
+  - AAC 20kbps  (线性插值 PLC)
+  - ESC  2kbps / 4kbps   (1/2 streams，LFR-PLC)
+  - DAC  1.5kbps / 3.0kbps  (3/6 codebooks，LFR-PLC)
+
+用法:
+  python scripts/eval_final.py \\
+      --flow_ckpt output/flow_checkpoints_stage2/best.pt \\
+      --num_samples 200 --part all
+"""
+
+import os
+import json
+import argparse
+import random
+import sys
+import time
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from speechtokenizer import SpeechTokenizer
+from speechtokenizer.flow import FlowMatchingModel, PretrainedSpeakerEncoder
+from scripts.eval_utils import (
+    set_seed, load_audio, load_filelist, build_spk2files, pick_ref_wav,
+    channel_simulate, flow_sample,
+    calc_visqol, calc_visqol_batch, calc_utmos, calc_plcmos,
+    nanmean,
+    HAS_ENCODEC,
+    encodec_with_plr, encodec_with_lfrplc,
+    ffmpeg_codec_with_interp, ffmpeg_codec_with_plr, opus_lbrr_with_plr,
+)
+
+_PROJ_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+# =============================================================================
+# 指标 / 竞品配置
+# =============================================================================
+
+RATE_METRICS     = ["visqol", "utmos"]
+PLR_METRICS      = ["visqol", "plcmos", "utmos"]
+ABLATION_METRICS = ["visqol", "plcmos", "utmos"]
+
+METRIC_LABELS = {
+    "visqol": "VISQoL MOS-LQO",
+    "utmos" : "UTMOS",
+    "plcmos": "PLCMOS",
+}
+
+# ── Part 1 码率竞品 ────────────────────────────────────────────────────────────
+#   ESC:  2 kbps/stream (hop=5ms, 1024-entry codebook → 10bits × 200fps = 2kbps)
+#   DAC:  0.5 kbps/codebook (stride=320@16kHz → 50fps × 10bits = 0.5kbps)
+RATE_COMPETITORS = {
+    "AAC": {
+        "type"    : "ffmpeg",
+        "codec"   : "aac",
+        "bitrates": [4, 5, 6, 7, 8, 10, 12, 16, 20],   # 去掉 24kbps
+        "color"   : "#17becf", "marker": "s",
+    },
+    "Opus": {
+        "type"    : "ffmpeg",
+        "codec"   : "libopus",
+        "bitrates": [5.0, 6.0, 7.0, 8.0, 10.0],        # 5~10kbps 五个档位
+        "color"   : "#2ca02c", "marker": "^",
+    },
+    "EnCodec": {
+        "type"    : "encodec",
+        "bitrates": [1.5, 3.0, 6.0],                   # 去掉 12kbps
+        "color"   : "#9467bd", "marker": "D",
+    },
+    "ESC": {
+        "type"    : "esc",
+        # 1~5 streams; 去掉 9kbps（6 streams）
+        "bitrates": [1.5, 3.0, 4.5, 6.0, 7.5],
+        "streams" : [1,   2,   3,   4,   5  ],
+        "color"   : "#e377c2", "marker": "P",
+    },
+    "DAC": {
+        "type"       : "dac",
+        # 3~15 codebooks, 0.5kbps each; 去掉 9kbps（18 codebooks）
+        "bitrates"   : [1.5, 3.0, 4.5, 6.0, 7.5],
+        "n_codebooks": [3,   6,   9,  12,  15  ],
+        "color"      : "#bcbd22", "marker": "X",
+    },
+}
+
+# ── Part 2 PLR 系统 ────────────────────────────────────────────────────────────
+PLR_SYSTEMS = {
+    "ours_1.5k"   : {"label": "Ours (1.5kbps, Flow-PLC)",              "type": "ours",    "n_layers": 3},
+    "ours_3.0k"   : {"label": "Ours (3.0kbps, Flow-PLC)",              "type": "ours",    "n_layers": 6},
+    "encodec_1.5k": {"label": "EnCodec (1.5kbps, LFR-PLC)",            "type": "encodec", "bw": 1.5},
+    "encodec_3.0k": {"label": "EnCodec (3.0kbps, LFR-PLC)",            "type": "encodec", "bw": 3.0},
+    "esc_1.5k"    : {"label": "ESC (1.5kbps, LFR-PLC)",                "type": "esc",     "streams": 1},
+    "esc_3.0k"    : {"label": "ESC (3.0kbps, LFR-PLC)",                "type": "esc",     "streams": 2},
+    "dac_1.5k"    : {"label": "DAC (1.5kbps, LFR-PLC)",               "type": "dac",     "n_codebooks": 3},
+    "dac_3.0k"    : {"label": "DAC (3.0kbps, LFR-PLC)",               "type": "dac",     "n_codebooks": 6},
+    "opus_8k"     : {"label": "Opus (~8kbps, LBRR)",                   "type": "opus",    "bw": 8.0},
+    "aac_20k"     : {"label": "AAC (20kbps, Linear-Interp PLC)",       "type": "aac",     "bw": 20.0},
+}
+
+PLR_LIST = [0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30]
+
+_PLR_STYLE = {
+    "ours_1.5k"   : {"color": "#d62728", "marker": "o", "ls": "--", "lw": 1.3},
+    "ours_3.0k"   : {"color": "#d62728", "marker": "o", "ls": "-",  "lw": 1.6},
+    "encodec_1.5k": {"color": "#9467bd", "marker": "D", "ls": "--", "lw": 1.1},
+    "encodec_3.0k": {"color": "#9467bd", "marker": "D", "ls": "-",  "lw": 1.1},
+    "esc_1.5k"    : {"color": "#e377c2", "marker": "P", "ls": "--", "lw": 1.1},
+    "esc_3.0k"    : {"color": "#e377c2", "marker": "P", "ls": "-",  "lw": 1.1},
+    "dac_1.5k"    : {"color": "#bcbd22", "marker": "X", "ls": "--", "lw": 1.1},
+    "dac_3.0k"    : {"color": "#bcbd22", "marker": "X", "ls": "-",  "lw": 1.1},
+    "opus_8k"     : {"color": "#2ca02c", "marker": "^", "ls": "-",  "lw": 1.1},
+    "aac_20k"     : {"color": "#17becf", "marker": "s", "ls": "-",  "lw": 1.1},
+}
+
+_ABLATION_COLORS = {2: "#d62728", 4: "#1f77b4", 6: "#2ca02c"}
+
+
+# =============================================================================
+# ESC / DAC 外部模型加载
+# =============================================================================
+
+_esc_model_cache = {}
+_dac_model_cache = {}
+_encodec_model_cache = {}
+
+
+def _try_load_esc():
+    """
+    从 efficient-speech-codec-main/ 加载 ESC (C-SVQGAN+SwinT) 模型。
+
+    源码  : efficient-speech-codec-main/
+    config: external_checkpoints/esc/config.yaml
+    weights: external_checkpoints/esc/model.pth
+    """
+    global _esc_model_cache
+    if "model" in _esc_model_cache:
+        return _esc_model_cache["model"]
+    try:
+        import yaml
+        import sys as _sys
+        # 把 ESC 源码目录加入 import 路径
+        esc_src = os.path.join(_PROJ_ROOT, "efficient-speech-codec-main")
+        if esc_src not in _sys.path:
+            _sys.path.insert(0, esc_src)
+        from esc.models.codecs import make_model
+
+        esc_ckpt_dir = os.path.join(_PROJ_ROOT, "external_checkpoints", "esc")
+        cfg_path = os.path.join(esc_ckpt_dir, "config.yaml")
+        pth_path = os.path.join(esc_ckpt_dir, "model.pth")
+
+        with open(cfg_path) as f:
+            cfg = yaml.safe_load(f)
+
+        model = make_model(cfg["model"], cfg["model_name"])
+        ckpt  = torch.load(pth_path, map_location="cpu")
+        model.load_state_dict(ckpt["model_state_dict"])
+        model.eval()
+
+        _esc_model_cache["model"] = model
+        print(f"[ESC] 已加载: {pth_path}  (model={cfg['model_name']})")
+        return model
+    except Exception as e:
+        print(f"[ESC] 加载失败: {e}")
+        _esc_model_cache["model"] = None
+        return None
+
+
+def _try_load_dac():
+    """
+    尝试从 external_checkpoints/dac/ 加载 DAC 模型。
+
+    依赖: pip install descript-audio-codec
+    config  : external_checkpoints/dac/config.yaml
+    weights : external_checkpoints/dac/weights.pth
+    """
+    global _dac_model_cache
+    if "model" in _dac_model_cache:
+        return _dac_model_cache["model"]
+    try:
+        import dac as dac_lib
+        model = dac_lib.DAC.load("16khz")   # 自动下载官方 16kHz 预训练权重
+        model.eval()
+        _dac_model_cache["model"] = model
+        print("[DAC] 官方 16kHz 预训练模型已加载")
+        return model
+    except ImportError:
+        print("[DAC] descript-audio-codec 未安装 (pip install descript-audio-codec)，跳过。")
+        _dac_model_cache["model"] = None
+        return None
+    except Exception as e:
+        print(f"[DAC] 加载失败: {e}")
+        _dac_model_cache["model"] = None
+        return None
+
+
+def _esc_encode_decode(wav_np: np.ndarray, sr: int, n_streams: int,
+                        p_loss: float = 0.0) -> "np.ndarray | None":
+    """
+    ESC 编解码 + LFR-PLC（时间 patch 级别）。
+
+    ESC 使用 STFT 域编码：hop=5ms, win=20ms, patch_size=[3,2]
+    每个 time-patch 覆盖 2 个 STFT 帧 = 10ms
+    LFR-PLC 在 time-patch 维上做最后一帧重复
+    """
+    model = _try_load_esc()
+    if model is None:
+        return None
+    try:
+        import torchaudio.functional as TAF
+        esc_sr = 16000   # ESC 固定 16kHz
+        wav_t = torch.from_numpy(wav_np.astype(np.float32)).unsqueeze(0)  # (1, T)
+        if sr != esc_sr:
+            wav_t = TAF.resample(wav_t, sr, esc_sr)
+
+        with torch.no_grad():
+            # encode: x (1, L) → codes (1, n_streams, group_size, H*W), feat_shape (H, W)
+            codes, feat_shape = model.encode(wav_t, num_streams=n_streams)
+
+            if p_loss > 0:
+                H_p, W_p = feat_shape   # (freq_patches, time_patches)
+                B, S, G, HW = codes.shape
+                # 展开时间维，在 W_p（时间）维模拟 LFR-PLC
+                codes_4d = codes.reshape(B, S, G, H_p, W_p)
+                last = codes_4d[:, :, :, :, 0].clone()
+                for t in range(W_p):
+                    if random.random() < p_loss:
+                        codes_4d[:, :, :, :, t] = last
+                    else:
+                        last = codes_4d[:, :, :, :, t].clone()
+                codes = codes_4d.reshape(B, S, G, HW)
+
+            # decode: codes (1, n_streams, group_size, H*W) → wav (1, L)
+            wav_out = model.decode(codes, feat_shape)
+
+        wav_dec = wav_out.squeeze().cpu().numpy()
+        if esc_sr != sr:
+            wav_dec_t = torch.from_numpy(wav_dec.astype(np.float32)).unsqueeze(0)
+            wav_dec   = TAF.resample(wav_dec_t, esc_sr, sr).squeeze().numpy()
+        return wav_dec.astype(np.float64)
+    except Exception as e:
+        print(f"  [ESC] 推理异常: {e}")
+        return None
+
+
+def _dac_encode_decode(wav_np: np.ndarray, sr: int, n_codebooks: int,
+                        p_loss: float = 0.0) -> "np.ndarray | None":
+    """
+    DAC 编解码 + LFR-PLC（使用前 n_codebooks 层）。
+
+    DAC 配置 (external_checkpoints/dac/config.yaml):
+      encoder_rates=[2,4,5,8] → stride=320 @ 16kHz → 50 fps
+      codebook_size=1024 → 10 bits/frame/codebook → 0.5 kbps/codebook
+    """
+    model = _try_load_dac()
+    if model is None:
+        return None
+    try:
+        import torchaudio.functional as TAF
+        dac_sr = model.sample_rate   # 16000
+
+        # 准备输入：(1, 1, T)
+        wav_t = torch.from_numpy(wav_np.astype(np.float32)).unsqueeze(0)  # (1, T)
+        if sr != dac_sr:
+            wav_t = TAF.resample(wav_t, sr, dac_sr)
+        audio_in = wav_t.unsqueeze(0)   # (1, 1, T)
+
+        with torch.no_grad():
+            # 部分版本需要 preprocess（padding 到帧对齐长度）
+            if hasattr(model, "preprocess"):
+                audio_in = model.preprocess(audio_in, dac_sr)
+
+            z, codes, latents, _, _ = model.encode(audio_in)
+            # codes: (1, max_n_codebooks, T_enc)
+
+            # 截断到前 n_codebooks 层
+            codes_trunc = codes[:, :n_codebooks, :].clone()
+
+            # LFR-PLC（Last Frame Repeat）：对 token 帧模拟丢包
+            if p_loss > 0:
+                T_enc = codes_trunc.shape[-1]
+                last  = codes_trunc[:, :, 0].clone()
+                for fi in range(T_enc):
+                    if random.random() < p_loss:
+                        codes_trunc[:, :, fi] = last
+                    else:
+                        last = codes_trunc[:, :, fi].clone()
+
+            # 从截断 codes 重建连续 latent z_q
+            # 兼容不同版本的 descript-audio-codec API
+            try:
+                z_q = model.quantizer.from_codes(codes_trunc)[0]
+            except (AttributeError, TypeError):
+                # 旧版 API：逐层累加各 codebook 的 embedding
+                z_q = torch.zeros_like(z)
+                for i in range(n_codebooks):
+                    z_q = z_q + model.quantizer.quantizers[i].decode(codes_trunc[:, i, :])
+
+            wav_dec = model.decode(z_q).squeeze().cpu().numpy()  # (T_out,)
+
+        if dac_sr != sr:
+            wav_dec_t = torch.from_numpy(wav_dec.astype(np.float32)).unsqueeze(0)
+            wav_dec   = TAF.resample(wav_dec_t, dac_sr, sr).squeeze().numpy()
+        return wav_dec.astype(np.float64)
+    except Exception as e:
+        print(f"  [DAC] 推理异常: {e}")
+        return None
+
+
+# =============================================================================
+# 模型加载
+# =============================================================================
+
+def _strip_compile_prefix(sd):
+    return {k.replace("_orig_mod.", ""): v for k, v in sd.items()}
+
+
+def load_models(args, device):
+    st_model = SpeechTokenizer.load_from_checkpoint(args.config_path, args.ckpt_path)
+    st_model.eval().to(device)
+    for p in st_model.parameters():
+        p.requires_grad_(False)
+
+    ckpt       = torch.load(args.flow_ckpt, map_location="cpu")
+    saved_args = argparse.Namespace(**ckpt.get("args", {}))
+    flow_model = FlowMatchingModel(
+        latent_dim = st_model.quantizer.dimension,
+        base_ch    = getattr(saved_args, "base_ch",   512),
+        ch_mults   = tuple(getattr(saved_args, "ch_mults", [1, 1, 2])),
+        cond_dim   = getattr(saved_args, "cond_dim",  512),
+        spk_dim    = getattr(saved_args, "spk_dim",   256),
+        time_dim   = getattr(saved_args, "time_dim",  128),
+        n_res      = getattr(saved_args, "n_res",     2),
+        n_mid_res  = getattr(saved_args, "n_mid_res", 2),
+    ).to(device)
+    flow_model.load_state_dict(_strip_compile_prefix(ckpt["flow_model"]))
+    flow_model.eval()
+
+    spk_encoder = PretrainedSpeakerEncoder(
+        emb_dim  = getattr(saved_args, "spk_dim", 256),
+        save_dir = os.path.join(os.path.dirname(args.flow_ckpt), "spkrec-ecapa"),
+    ).to(device)
+    spk_encoder.load_state_dict(_strip_compile_prefix(ckpt["spk_encoder"]), strict=False)
+    spk_encoder.eval()
+    del ckpt
+    return st_model, flow_model, spk_encoder
+
+
+# =============================================================================
+# 通用绘图辅助
+# =============================================================================
+
+def _plot_line(ax, xs, ys, color, marker, label, lw=1.1, ls="-", zorder=3):
+    pairs = [(x, y) for x, y in zip(xs, ys) if not np.isnan(float(y))]
+    if not pairs:
+        return
+    px, py = zip(*pairs)
+    ax.plot(px, py, color=color, marker=marker, linewidth=lw,
+            linestyle=ls, markersize=3.5, markerfacecolor="none",
+            markeredgewidth=0.9, label=label, zorder=zorder)
+
+
+def _make_grid_fig(n_metrics, ncols=3, cell_w=4.5, cell_h=4.5):
+    nrows = (n_metrics + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(cell_w * ncols, cell_h * nrows))
+    if nrows == 1:
+        axes = np.array([axes])
+    axes_flat = axes.flatten()
+    for mi in range(n_metrics, len(axes_flat)):
+        axes_flat[mi].set_visible(False)
+    return fig, axes_flat
+
+
+# =============================================================================
+# Part 1: 码率测试
+# =============================================================================
+
+def eval_rate_ours(args, st_model, flow_model, spk_encoder, selected, spk2f, device, out_dir):
+    sr   = st_model.sample_rate
+    rows = []
+    for N in args.n_layers_list:
+        bitrate = N * 0.5
+        print(f"\n[Ours] N={N} ({bitrate:.1f}kbps) ...", flush=True)
+        acc      = {m: [] for m in RATE_METRICS}
+        ref_list, deg_list = [], []
+
+        for i, fpath in enumerate(selected):
+            print(f"  [{i+1}/{len(selected)}]", end="\r", flush=True)
+            wav    = load_audio(fpath, sr)[:, :int(args.max_sec * sr)]
+            ref_np = wav.squeeze().numpy().astype(np.float64)
+            ref_wav = pick_ref_wav(fpath, spk2f, sr).to(device)
+
+            result = channel_simulate(st_model, wav, N, p_loss=0.0, device=device)
+            with torch.no_grad():
+                spk_emb  = spk_encoder(ref_wav)
+                lat_flow = flow_sample(flow_model, result["latent_ch"],
+                                       spk_emb, n_steps=args.n_steps, n_layers=N)
+                wav_flow = st_model.decoder(lat_flow).squeeze(0).cpu()
+            deg = wav_flow.squeeze().numpy().astype(np.float64)
+
+            ref_list.append(ref_np)
+            deg_list.append(deg)
+            acc["utmos"].append(calc_utmos(deg, sr))
+
+        v_list = calc_visqol_batch(ref_list, deg_list, sr, args.visqol_workers) \
+                 if not args.no_visqol else [float("nan")] * len(ref_list)
+        acc["visqol"] = v_list
+
+        row = {"bitrate_kbps": bitrate}
+        row.update({m: nanmean(acc[m]) for m in RATE_METRICS})
+        rows.append(row)
+        print(f"\n  N={N}: " + "  ".join(f"{m.upper()}={row[m]:.3f}" for m in RATE_METRICS))
+        _save_rate_json(rows, {}, out_dir)
+    return rows
+
+
+def _eval_rate_one_system(codec_fn, selected, sr, max_sec, no_visqol, visqol_workers):
+    """通用：对一个编解码函数跑完 selected 列表，返回各指标均值。"""
+    ref_list, deg_list = [], []
+    acc = {m: [] for m in RATE_METRICS}
+    for fpath in selected:
+        wav    = load_audio(fpath, sr)[:, :int(max_sec * sr)]
+        ref_np = wav.squeeze().numpy().astype(np.float64)
+        deg = codec_fn(wav.squeeze(0), sr)
+        if deg is None:
+            continue
+        ref_list.append(ref_np)
+        deg_list.append(deg)
+        acc["utmos"].append(calc_utmos(deg, sr))
+
+    v_list = calc_visqol_batch(ref_list, deg_list, sr, visqol_workers) \
+             if (not no_visqol and ref_list) else [float("nan")] * len(ref_list)
+    acc["visqol"] = v_list
+    return {m: nanmean(acc[m]) for m in RATE_METRICS}
+
+
+def eval_rate_competitors(args, selected, spk2f, sr, device):
+    results = {}
+
+    for name, cfg in RATE_COMPETITORS.items():
+
+        if cfg["type"] == "encodec" and not HAS_ENCODEC:
+            print(f"  [skip] {name}: encodec not installed")
+            continue
+
+        if cfg["type"] == "esc":
+            if _try_load_esc() is None:
+                print(f"  [skip] {name}: ESC model not available")
+                continue
+            rows = []
+            for bw, n_st in zip(cfg["bitrates"], cfg["streams"]):
+                print(f"\n[{name}] {bw:.1f}kbps ({n_st} streams) ...", flush=True)
+                fn = lambda w, s, ns=n_st: _esc_encode_decode(w.numpy(), s, ns, p_loss=0.0)
+                m  = _eval_rate_one_system(fn, selected, sr, args.max_sec,
+                                           args.no_visqol, args.visqol_workers)
+                m["bitrate_kbps"] = bw
+                rows.append(m)
+                print("  " + "  ".join(f"{k.upper()}={v:.3f}" for k, v in m.items()
+                                       if k != "bitrate_kbps"))
+            results[name] = rows
+            continue
+
+        if cfg["type"] == "dac":
+            if _try_load_dac() is None:
+                print(f"  [skip] {name}: DAC model not available")
+                continue
+            rows = []
+            for bw, n_cb in zip(cfg["bitrates"], cfg["n_codebooks"]):
+                print(f"\n[{name}] {bw:.1f}kbps ({n_cb} codebooks) ...", flush=True)
+                fn = lambda w, s, nc=n_cb: _dac_encode_decode(w.numpy(), s, nc, p_loss=0.0)
+                m  = _eval_rate_one_system(fn, selected, sr, args.max_sec,
+                                           args.no_visqol, args.visqol_workers)
+                m["bitrate_kbps"] = bw
+                rows.append(m)
+                print("  " + "  ".join(f"{k.upper()}={v:.3f}" for k, v in m.items()
+                                       if k != "bitrate_kbps"))
+            results[name] = rows
+            continue
+
+        # ffmpeg / encodec 通用路径
+        rows = []
+        for bw in cfg["bitrates"]:
+            print(f"\n[{name}] {bw}kbps ...", flush=True)
+            if cfg["type"] == "encodec":
+                fn = lambda w, s, bw=bw: encodec_with_plr(w, s, bw, p_loss=0.0, device=device)
+            else:
+                fn = lambda w, s, bw=bw, cd=cfg["codec"]: \
+                         ffmpeg_codec_with_plr(w, s, cd, bw, p_loss=0.0)
+            m = _eval_rate_one_system(fn, selected, sr, args.max_sec,
+                                      args.no_visqol, args.visqol_workers)
+            m["bitrate_kbps"] = bw
+            rows.append(m)
+            print("  " + "  ".join(f"{k.upper()}={v:.3f}" for k, v in m.items()
+                                   if k != "bitrate_kbps"))
+        results[name] = rows
+
+    return results
+
+
+def _save_rate_json(ours_rows, comp_results, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+    data = {"ours": ours_rows, "competitors": comp_results}
+    path = os.path.join(out_dir, "rate_data.json")
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"Saved: {path}")
+
+
+def plot_rate(ours_rows, comp_results, out_dir, n_samples):
+    fig, axes_flat = _make_grid_fig(len(RATE_METRICS))
+    for mi, metric in enumerate(RATE_METRICS):
+        ax = axes_flat[mi]
+        for name, cfg in RATE_COMPETITORS.items():
+            if name not in comp_results:
+                continue
+            rows = comp_results[name]
+            _plot_line(ax, [r["bitrate_kbps"] for r in rows],
+                       [r.get(metric, float("nan")) for r in rows],
+                       cfg["color"], cfg["marker"], name)
+        _plot_line(ax,
+                   [r["bitrate_kbps"] for r in ours_rows],
+                   [r.get(metric, float("nan")) for r in ours_rows],
+                   "#d62728", "o", "TimbreFlow (Ours)", lw=1.6, zorder=6)
+        ax.set_xlabel("Bitrate (kbps)", fontsize=10)
+        ax.set_ylabel(METRIC_LABELS[metric], fontsize=10)
+        ax.set_xlim(left=0)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8, loc="lower right")
+        ax.set_title(f"({chr(97 + mi)})", fontsize=10, pad=4)
+
+    fig.suptitle(f"Quality vs Bitrate  (PLR=0%, n={n_samples})", fontsize=12)
+    plt.tight_layout()
+    path = os.path.join(out_dir, "fig_rate_final.png")
+    plt.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Figure saved: {path}")
+
+
+# =============================================================================
+# Part 2: PLR 测试
+# =============================================================================
+
+def _eval_plr_one_file(fpath, plr, st_model, flow_model, spk_encoder,
+                        spk2f, device, args):
+    """评估单个文件在给定 PLR 下所有系统的指标，返回 {key: {metric: value}}。"""
+    sr     = st_model.sample_rate
+    wav    = load_audio(fpath, sr)[:, :int(args.max_sec * sr)]
+    wav_np = wav.squeeze().numpy().astype(np.float64)
+
+    deg_map = {}
+
+    # Ours (Flow-PLC)
+    for n_layers, key in [(3, "ours_1.5k"), (6, "ours_3.0k")]:
+        try:
+            sim = channel_simulate(st_model, wav, n_layers, p_loss=plr, device=device)
+            with torch.no_grad():
+                ref_wav  = pick_ref_wav(fpath, spk2f, sr).to(device)
+                spk_emb  = spk_encoder(ref_wav)
+                lat_flow = flow_sample(flow_model, sim["latent_ch"],
+                                       spk_emb, n_steps=args.n_steps, n_layers=n_layers)
+                wav_flow = st_model.decoder(lat_flow).squeeze(0).cpu()
+            deg_map[key] = wav_flow.squeeze().numpy().astype(np.float64)
+        except Exception as e:
+            print(f"  [{key}] {e}")
+            deg_map[key] = None
+
+    # EnCodec LFR-PLC
+    for bw, key in [(1.5, "encodec_1.5k"), (3.0, "encodec_3.0k")]:
+        deg_map[key] = encodec_with_lfrplc(wav.squeeze(0), sr, bw, plr, device) \
+                       if HAS_ENCODEC else None
+
+    # ESC LFR-PLC
+    for n_st, key in [(1, "esc_1.5k"), (2, "esc_3.0k")]:
+        try:
+            deg_map[key] = _esc_encode_decode(wav_np, sr, n_st, plr)
+        except Exception:
+            deg_map[key] = None
+
+    # DAC LFR-PLC
+    for n_cb, key in [(3, "dac_1.5k"), (6, "dac_3.0k")]:
+        try:
+            deg_map[key] = _dac_encode_decode(wav_np, sr, n_cb, plr)
+        except Exception:
+            deg_map[key] = None
+
+    # Opus ~8kbps inband FEC
+    try:
+        deg_map["opus_8k"] = opus_lbrr_with_plr(wav.squeeze(0), sr, 8.0, plr)
+    except Exception:
+        deg_map["opus_8k"] = None
+
+    # AAC 20kbps + 线性插值 PLC
+    try:
+        deg_map["aac_20k"] = ffmpeg_codec_with_interp(wav.squeeze(0), sr, "aac", 20.0, plr)
+    except Exception:
+        deg_map["aac_20k"] = None
+
+    # 批量 VISQoL
+    valid_keys = [k for k in PLR_SYSTEMS if deg_map.get(k) is not None]
+    v_scores   = calc_visqol_batch(
+        [wav_np] * len(valid_keys),
+        [deg_map[k] for k in valid_keys],
+        sr, n_workers=max(1, len(valid_keys))
+    ) if (not args.no_visqol and valid_keys) else [float("nan")] * len(valid_keys)
+    visqol_map = dict(zip(valid_keys, v_scores))
+
+    results = {}
+    for key in PLR_SYSTEMS:
+        deg_np = deg_map.get(key)
+        if deg_np is None:
+            results[key] = {m: float("nan") for m in PLR_METRICS}
+        else:
+            results[key] = {
+                "visqol" : visqol_map.get(key, float("nan")),
+                "plcmos" : calc_plcmos(deg_np, wav_np, sr),
+                "utmos"  : calc_utmos(deg_np, sr),
+            }
+    return results
+
+
+def _save_plr_json(final, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+    data = {"plr_list": PLR_LIST, "systems": final}
+    path = os.path.join(out_dir, "plr_data.json")
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"Saved: {path}")
+
+
+def plot_plr(final, out_dir, n_samples):
+    fig, axes_flat = _make_grid_fig(len(PLR_METRICS))
+    plr_pct = [p * 100 for p in PLR_LIST]
+
+    for mi, metric in enumerate(PLR_METRICS):
+        ax = axes_flat[mi]
+        for key, sys_cfg in PLR_SYSTEMS.items():
+            style = _PLR_STYLE[key]
+            vals  = final[key].get(metric, [])
+            _plot_line(ax, plr_pct, vals,
+                       style["color"], style["marker"], sys_cfg["label"],
+                       lw=style["lw"], ls=style["ls"])
+        ax.set_xlabel("Packet Loss Probability (%)", fontsize=10)
+        ax.set_ylabel(METRIC_LABELS[metric], fontsize=10)
+        ax.set_xlim(-1, 32)
+        ax.grid(True, alpha=0.3)
+        ax.set_title(f"({chr(97 + mi)})", fontsize=10, pad=4)
+
+    handles, labels = axes_flat[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=4,
+               fontsize=8, framealpha=0.9, bbox_to_anchor=(0.5, -0.02))
+    fig.suptitle(f"Quality vs Packet Loss Rate  (n={n_samples})", fontsize=12)
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.18)
+    path = os.path.join(out_dir, "fig_plr_final.png")
+    plt.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Figure saved: {path}")
+
+
+# =============================================================================
+# Part 3: 消融实验 (有/无 Flow) — x 轴为 PLR，6 条线 (3 码率 × 2 条件)
+# =============================================================================
+
+def eval_ablation(args, st_model, flow_model, spk_encoder,
+                  selected, spk2f, device, out_dir):
+    sr     = st_model.sample_rate
+    result = {N: {"with":    {m: [] for m in ABLATION_METRICS},
+                  "without": {m: [] for m in ABLATION_METRICS}}
+              for N in args.ablation_layers}
+
+    total   = len(PLR_LIST) * len(args.ablation_layers)
+    done    = 0
+    t_start = time.time()
+
+    for pi, plr in enumerate(PLR_LIST):
+        print(f"\n[Ablation] PLR={plr*100:.0f}%  ({pi+1}/{len(PLR_LIST)})", flush=True)
+        for N in args.ablation_layers:
+            bitrate  = N * 0.5
+            per_w    = {m: [] for m in ABLATION_METRICS}
+            per_wo   = {m: [] for m in ABLATION_METRICS}
+            ref_w,  deg_w  = [], []
+            ref_wo, deg_wo = [], []
+
+            for fpath in selected:
+                wav     = load_audio(fpath, sr)[:, :int(args.max_sec * sr)]
+                ref_np  = wav.squeeze().numpy().astype(np.float64)
+                ref_wav = pick_ref_wav(fpath, spk2f, sr).to(device)
+
+                sim = channel_simulate(st_model, wav, N, p_loss=plr, device=device)
+
+                # With flow
+                with torch.no_grad():
+                    spk_emb  = spk_encoder(ref_wav)
+                    lat_flow = flow_sample(flow_model, sim["latent_ch"],
+                                           spk_emb, n_steps=args.n_steps, n_layers=N)
+                    wav_with = st_model.decoder(lat_flow).squeeze(0).cpu()
+                d_with = wav_with.squeeze().numpy().astype(np.float64)
+
+                # Without flow: 直接解码 N 层 latent
+                with torch.no_grad():
+                    wav_without = st_model.decoder(sim["latent_ch"]).squeeze(0).cpu()
+                d_without = wav_without.squeeze().numpy().astype(np.float64)
+
+                ref_w.append(ref_np);  deg_w.append(d_with)
+                ref_wo.append(ref_np); deg_wo.append(d_without)
+                per_w["utmos"].append(calc_utmos(d_with, sr))
+                per_w["plcmos"].append(calc_plcmos(d_with, ref_np, sr))
+                per_wo["utmos"].append(calc_utmos(d_without, sr))
+                per_wo["plcmos"].append(calc_plcmos(d_without, ref_np, sr))
+
+            v_with    = calc_visqol_batch(ref_w,  deg_w,  sr, args.visqol_workers) \
+                        if not args.no_visqol else [float("nan")] * len(ref_w)
+            v_without = calc_visqol_batch(ref_wo, deg_wo, sr, args.visqol_workers) \
+                        if not args.no_visqol else [float("nan")] * len(ref_wo)
+            per_w["visqol"]  = v_with
+            per_wo["visqol"] = v_without
+
+            for m in ABLATION_METRICS:
+                result[N]["with"][m].append(nanmean(per_w[m]))
+                result[N]["without"][m].append(nanmean(per_wo[m]))
+
+            done += 1
+            eta = (time.time() - t_start) / done * (total - done)
+            print(f"  N={N} ({bitrate:.1f}k)  "
+                  f"VISQoL w/={result[N]['with']['visqol'][-1]:.3f}  "
+                  f"wo/={result[N]['without']['visqol'][-1]:.3f}  "
+                  f"ETA {eta/60:.0f}min", flush=True)
+
+    _save_ablation_json(result, out_dir)
+    return result
+
+
+def _save_ablation_json(result, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+    data = {
+        "plr_list": PLR_LIST,
+        "result":   {str(N): v for N, v in result.items()},
+    }
+    path = os.path.join(out_dir, "ablation_data.json")
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"Saved: {path}")
+
+
+def plot_ablation(result, out_dir, n_samples):
+    fig, axes_flat = _make_grid_fig(len(ABLATION_METRICS))
+    plr_pct = [p * 100 for p in PLR_LIST]
+
+    for mi, metric in enumerate(ABLATION_METRICS):
+        ax = axes_flat[mi]
+        for N in sorted(result.keys()):
+            bitrate = N * 0.5
+            color   = _ABLATION_COLORS.get(N, "#7f7f7f")
+            ys_w    = result[N]["with"][metric]
+            ys_wo   = result[N]["without"][metric]
+            _plot_line(ax, plr_pct, ys_w,  color, "o",
+                       f"{bitrate:.1f}kbps w/ Flow",  lw=2.2, ls="-",  zorder=5)
+            _plot_line(ax, plr_pct, ys_wo, color, "s",
+                       f"{bitrate:.1f}kbps w/o Flow", lw=1.8, ls="--", zorder=4)
+        ax.set_xlabel("Packet Loss Probability (%)", fontsize=10)
+        ax.set_ylabel(METRIC_LABELS[metric], fontsize=10)
+        ax.set_xlim(-1, 32)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8, ncol=1)
+        ax.set_title(f"({chr(97 + mi)})", fontsize=10, pad=4)
+
+    fig.suptitle(f"Ablation: w/ vs w/o Flow Model  (n={n_samples})", fontsize=12)
+    plt.tight_layout()
+    path = os.path.join(out_dir, "fig_ablation_final.png")
+    plt.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Figure saved: {path}")
+
+
+# =============================================================================
+# Part 4: 可视化
+# =============================================================================
+
+def _log_mel_spectrogram(wav_np: np.ndarray, sr: int,
+                          n_fft: int = 1024, hop: int = 256, n_mels: int = 80):
+    import torchaudio.transforms as T
+    wav_t  = torch.from_numpy(wav_np.astype(np.float32)).unsqueeze(0)
+    mel_fn = T.MelSpectrogram(sample_rate=sr, n_fft=n_fft, hop_length=hop,
+                               n_mels=n_mels, power=2.0)
+    spec   = mel_fn(wav_t).squeeze(0)
+    return (10.0 * torch.log10(spec + 1e-9)).numpy()
+
+
+def _show_spec(ax, wav_np, sr, title):
+    try:
+        spec = _log_mel_spectrogram(wav_np, sr)
+        ax.imshow(spec, aspect="auto", origin="lower", interpolation="none",
+                  cmap="magma", vmin=-80, vmax=0)
+        ax.set_title(title, fontsize=8, pad=3)
+        ax.axis("off")
+    except Exception as e:
+        ax.text(0.5, 0.5, f"Error\n{e}", ha="center", va="center",
+                transform=ax.transAxes, fontsize=7)
+        ax.set_title(title, fontsize=8, pad=3)
+        ax.axis("off")
+
+
+def eval_vis(args, st_model, flow_model, spk_encoder, selected, spk2f, device, out_dir):
+    """
+    取第 1 条文件，生成各系统频谱对比（PLR=0%）。
+    系统: Original / Ours-1.5k / Ours-3k / EnCodec-1.5k / EnCodec-3k /
+           ESC-2k / DAC-1.5k / Opus-8k / AAC-20k
+    布局: 3×3，共 9 格，最后一格如不足则隐藏。
+    """
+    sr     = st_model.sample_rate
+    fpath  = selected[0]
+    wav    = load_audio(fpath, sr)[:, :int(args.max_sec * sr)]
+    wav_np = wav.squeeze().numpy().astype(np.float64)
+    print(f"\n[Vis-A] File: {os.path.basename(fpath)}", flush=True)
+
+    ordered = [("Original", wav_np)]
+
+    # Ours 1.5kbps
+    res = channel_simulate(st_model, wav, 3, p_loss=0.0, device=device)
+    with torch.no_grad():
+        ref_wav = pick_ref_wav(fpath, spk2f, sr).to(device)
+        spk_emb = spk_encoder(ref_wav)
+        lat     = flow_sample(flow_model, res["latent_ch"], spk_emb,
+                              n_steps=args.n_steps, n_layers=3)
+        w_f     = st_model.decoder(lat).squeeze(0).cpu()
+    ordered.append(("Ours 1.5kbps (Flow-PLC)", w_f.squeeze().numpy().astype(np.float64)))
+
+    # Ours 3.0kbps
+    res = channel_simulate(st_model, wav, 6, p_loss=0.0, device=device)
+    with torch.no_grad():
+        lat = flow_sample(flow_model, res["latent_ch"], spk_emb,
+                          n_steps=args.n_steps, n_layers=6)
+        w_f = st_model.decoder(lat).squeeze(0).cpu()
+    ordered.append(("Ours 3.0kbps (Flow-PLC)", w_f.squeeze().numpy().astype(np.float64)))
+
+    # EnCodec 1.5kbps
+    d = encodec_with_lfrplc(wav.squeeze(0), sr, 1.5, 0.0, device) if HAS_ENCODEC else None
+    ordered.append(("EnCodec 1.5kbps (LFR-PLC)", d if d is not None else wav_np))
+
+    # EnCodec 3.0kbps
+    d = encodec_with_lfrplc(wav.squeeze(0), sr, 3.0, 0.0, device) if HAS_ENCODEC else None
+    ordered.append(("EnCodec 3.0kbps (LFR-PLC)", d if d is not None else wav_np))
+
+    # ESC 1.5kbps (1 stream)
+    d = _esc_encode_decode(wav_np, sr, 1, 0.0)
+    ordered.append(("ESC 1.5kbps (LFR-PLC)", d if d is not None else wav_np))
+
+    # ESC 3.0kbps (2 streams)
+    d = _esc_encode_decode(wav_np, sr, 2, 0.0)
+    ordered.append(("ESC 3.0kbps (LFR-PLC)", d if d is not None else wav_np))
+
+    # DAC 1.5kbps (3 codebooks)
+    d = _dac_encode_decode(wav_np, sr, 3, 0.0)
+    ordered.append(("DAC 1.5kbps (LFR-PLC)", d if d is not None else wav_np))
+
+    # DAC 3.0kbps (6 codebooks)
+    d = _dac_encode_decode(wav_np, sr, 6, 0.0)
+    ordered.append(("DAC 3.0kbps (LFR-PLC)", d if d is not None else wav_np))
+
+    # Opus ~8kbps
+    d = opus_lbrr_with_plr(wav.squeeze(0), sr, 8.0, 0.0)
+    ordered.append(("Opus ~8kbps (LBRR)", d if d is not None else wav_np))
+
+    # AAC 20kbps
+    d = ffmpeg_codec_with_interp(wav.squeeze(0), sr, "aac", 20.0, 0.0)
+    ordered.append(("AAC 20kbps (Lin-Interp PLC)", d if d is not None else wav_np))
+
+    # 11 panels → 4×3 grid, 1 格留空
+    n_panels = len(ordered)
+    ncols = 3
+    nrows = (n_panels + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(14, 4.5 * nrows))
+    axes_flat = axes.flatten()
+
+    for i, (title, w_np) in enumerate(ordered):
+        _show_spec(axes_flat[i], w_np.astype(np.float32), sr, title)
+    for i in range(len(ordered), len(axes_flat)):
+        axes_flat[i].set_visible(False)
+
+    fig.suptitle(f"System Comparison Spectrograms (PLR=0%) | {os.path.basename(fpath)}",
+                 fontsize=11)
+    plt.tight_layout()
+    path = os.path.join(out_dir, "fig_vis_final.png")
+    plt.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Figure saved: {path}")
+
+
+@torch.no_grad()
+def _extract_encodec_features(fpath, sr, max_sec, device):
+    """
+    提取 EnCodec 各 codebook 层的时间平均 latent 向量。
+    使用 6kbps（8 codebooks），与 SpeechTokenizer 的 8 层 RVQ 对齐。
+    返回 {cb1..cb8, cb28}: 每个 key 对应一个 (D,) 向量。
+    """
+    if not HAS_ENCODEC:
+        return None
+    import torchaudio.functional as TAF
+    from encodec import EncodecModel
+
+    cache_key = (6.0, str(device))
+    if cache_key not in _encodec_model_cache:
+        m = EncodecModel.encodec_model_24khz()
+        m.set_target_bandwidth(6.0)
+        _encodec_model_cache[cache_key] = m.to(device).eval()
+    enc_model = _encodec_model_cache[cache_key]
+    enc_model.set_target_bandwidth(6.0)
+
+    enc_sr = enc_model.sample_rate   # 24000
+    wav    = load_audio(fpath, sr)[:, :int(max_sec * sr)]   # (1, T)
+    wav_enc = TAF.resample(wav, sr, enc_sr).unsqueeze(0).to(device)  # (1,1,T)
+
+    frames = enc_model.encode(wav_enc)
+    codes  = frames[0][0]   # (1, n_q, T_enc)
+    n_q    = codes.shape[1]  # 8 at 6kbps
+
+    result = {}
+    layers_emb = []
+    for i, layer in enumerate(enc_model.quantizer.layers[:n_q]):
+        emb = layer.decode(codes[:, i, :])          # (1, D, T_enc)
+        vec = emb.squeeze(0).mean(dim=-1).cpu().numpy()  # (D,)
+        result[f"cb{i+1}"] = vec
+        layers_emb.append(emb)
+
+    # cb2-8 之和（音色层）
+    cb28 = sum(layers_emb[1:]).squeeze(0).mean(dim=-1).cpu().numpy()
+    result["cb28"] = cb28
+    return result
+
+
+@torch.no_grad()
+def _extract_rvq_features(st_model, fpath, sr, max_sec, device):
+    wav   = load_audio(fpath, sr)[:, :int(max_sec * sr)].unsqueeze(0).to(device)
+    codes = st_model.encode(wav)
+    D     = st_model.quantizer.dimension
+
+    def decode_layer(idx):
+        vq_l = st_model.quantizer.vq.layers[idx]
+        d    = vq_l.decode(codes[idx])
+        if d.shape[-1] == D:
+            d = d.permute(0, 2, 1)
+        return d.contiguous()
+
+    to_vec = lambda x: x.squeeze(0).mean(dim=-1).cpu().numpy()
+    layers = [decode_layer(i) for i in range(8)]
+    result = {f"rvq{i+1}": to_vec(lyr) for i, lyr in enumerate(layers)}
+    result["rvq28"] = to_vec(sum(layers[1:]))
+    return result
+
+
+def eval_disentangle(args, st_model, spk2f, device, out_dir):
+    try:
+        from sklearn.manifold import TSNE
+    except ImportError:
+        print("[Vis-B] sklearn 未安装，跳过 t-SNE。pip install scikit-learn")
+        return
+
+    sr         = st_model.sample_rate
+    spk_ids    = sorted(spk2f.keys())
+    random.shuffle(spk_ids)
+    sel_spks   = spk_ids[:args.disentangle_n_speakers]
+    feat_keys  = [f"rvq{i}" for i in range(1, 9)] + ["rvq28"]
+    accum      = {k: [] for k in feat_keys}
+    spk_labels = []
+
+    print(f"\n[Vis-B] t-SNE: {args.disentangle_n_speakers} speakers × "
+          f"{args.disentangle_n_per_speaker} utts ...", flush=True)
+    for spk_idx, spk in enumerate(sel_spks):
+        chosen = random.sample(spk2f[spk], min(args.disentangle_n_per_speaker, len(spk2f[spk])))
+        for fpath in chosen:
+            try:
+                feats = _extract_rvq_features(st_model, fpath, sr, args.max_sec, device)
+                for k in feat_keys:
+                    accum[k].append(feats[k])
+                spk_labels.append(spk_idx)
+            except Exception as e:
+                print(f"  [skip] {os.path.basename(fpath)}: {e}")
+
+    if len(spk_labels) < 5:
+        print("[Vis-B] 样本不足，跳过 t-SNE。")
+        return
+
+    feat_dict = {k: np.stack(accum[k]) for k in feat_keys}
+    print(f"  Total samples: {len(spk_labels)}")
+
+    npz_path = os.path.join(out_dir, "disentangle_data.npz")
+    np.savez(npz_path, spk_labels=np.array(spk_labels), **feat_dict)
+    print(f"Saved: {npz_path}")
+
+    unique_spks  = sorted(set(spk_labels))
+    cmap         = plt.get_cmap("tab10")
+    colors       = {s: cmap(i % 10) for i, s in enumerate(unique_spks)}
+    panel_titles = {f"rvq{i}": f"RVQ Layer {i}" for i in range(1, 9)}
+    panel_titles["rvq1"]  += "\n(semantic)"
+    panel_titles["rvq28"]  = "RVQ 2-8 Sum\n(timbre)"
+
+    fig, axes  = plt.subplots(3, 3, figsize=(14, 13))
+    axes_flat  = axes.flatten()
+    for pi, key in enumerate(feat_keys):
+        ax    = axes_flat[pi]
+        feats = feat_dict[key]
+        print(f"  t-SNE: {key} ...", flush=True)
+        emb = TSNE(n_components=2, perplexity=min(30, len(feats) - 1),
+                   random_state=42, max_iter=1000).fit_transform(feats)
+        for spk in unique_spks:
+            idx = [i for i, s in enumerate(spk_labels) if s == spk]
+            ax.scatter(emb[idx, 0], emb[idx, 1], color=colors[spk],
+                       label=f"Spk {spk}", s=30, alpha=0.8, edgecolors="none")
+        ax.set_title(panel_titles[key], fontsize=10)
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.grid(True, alpha=0.2)
+
+    handles, labels_leg = axes_flat[0].get_legend_handles_labels()
+    fig.legend(handles, labels_leg, loc="lower center",
+               ncol=min(len(unique_spks), 10),
+               fontsize=7, framealpha=0.9, bbox_to_anchor=(0.5, -0.02))
+    fig.suptitle("SpeechTokenizer RVQ Layer Feature t-SNE (colored by speaker identity)",
+                 fontsize=13)
+    plt.tight_layout()
+    path = os.path.join(out_dir, "fig_disentangle_tsne.png")
+    plt.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Figure saved: {path}")
+
+    # ── EnCodec t-SNE ─────────────────────────────────────────────────────────
+    if not HAS_ENCODEC:
+        print("[Vis-B] EnCodec 未安装，跳过 EnCodec t-SNE。")
+        return
+
+    print(f"\n[Vis-B] EnCodec t-SNE: {args.disentangle_n_speakers} speakers × "
+          f"{args.disentangle_n_per_speaker} utts (6kbps, 8 codebooks) ...", flush=True)
+
+    enc_feat_keys = [f"cb{i}" for i in range(1, 9)] + ["cb28"]
+    enc_accum     = {k: [] for k in enc_feat_keys}
+    enc_labels    = []
+
+    for spk_idx, spk in enumerate(sel_spks):
+        chosen = random.sample(spk2f[spk], min(args.disentangle_n_per_speaker, len(spk2f[spk])))
+        for fpath in chosen:
+            try:
+                feats = _extract_encodec_features(fpath, sr, args.max_sec, device)
+                if feats is None:
+                    continue
+                for k in enc_feat_keys:
+                    enc_accum[k].append(feats[k])
+                enc_labels.append(spk_idx)
+            except Exception as e:
+                print(f"  [skip EnCodec] {os.path.basename(fpath)}: {e}")
+
+    if len(enc_labels) < 5:
+        print("[Vis-B] EnCodec 样本不足，跳过 EnCodec t-SNE。")
+        return
+
+    enc_feat_dict = {k: np.stack(enc_accum[k]) for k in enc_feat_keys}
+    enc_npz_path  = os.path.join(out_dir, "disentangle_encodec_data.npz")
+    np.savez(enc_npz_path, spk_labels=np.array(enc_labels), **enc_feat_dict)
+    print(f"Saved: {enc_npz_path}")
+
+    enc_panel_titles = {f"cb{i}": f"CodeBook {i}" for i in range(1, 9)}
+    enc_panel_titles["cb1"]  += "\n(semantic)"
+    enc_panel_titles["cb28"]  = "CB 2-8 Sum\n(acoustic)"
+
+    fig2, axes2   = plt.subplots(3, 3, figsize=(14, 13))
+    axes2_flat    = axes2.flatten()
+    unique_enc    = sorted(set(enc_labels))
+    colors_enc    = {s: cmap(i % 10) for i, s in enumerate(unique_enc)}
+
+    for pi, key in enumerate(enc_feat_keys):
+        ax    = axes2_flat[pi]
+        feats = enc_feat_dict[key]
+        print(f"  t-SNE EnCodec: {key} ...", flush=True)
+        emb = TSNE(n_components=2, perplexity=min(30, len(feats) - 1),
+                   random_state=42, max_iter=1000).fit_transform(feats)
+        for spk in unique_enc:
+            idx = [i for i, s in enumerate(enc_labels) if s == spk]
+            ax.scatter(emb[idx, 0], emb[idx, 1], color=colors_enc[spk],
+                       label=f"Spk {spk}", s=30, alpha=0.8, edgecolors="none")
+        ax.set_title(enc_panel_titles.get(key, key), fontsize=10)
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.grid(True, alpha=0.2)
+
+    handles2, labels2 = axes2_flat[0].get_legend_handles_labels()
+    fig2.legend(handles2, labels2, loc="lower center",
+                ncol=min(len(unique_enc), 10),
+                fontsize=7, framealpha=0.9, bbox_to_anchor=(0.5, -0.02))
+    fig2.suptitle("EnCodec Codebook Feature t-SNE  (6kbps, colored by speaker identity)",
+                  fontsize=13)
+    plt.tight_layout()
+    path2 = os.path.join(out_dir, "fig_disentangle_tsne_encodec.png")
+    plt.savefig(path2, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Figure saved: {path2}")
+
+
+# =============================================================================
+# Part 5: 模块延迟基准 + 实时性分析
+# =============================================================================
+
+def eval_latency(args, st_model, flow_model, spk_encoder, device, out_dir):
+    """
+    逐块测量各模块延迟，分析流水线实时性。
+
+    流水线模型（帧级双端并行）:
+      发送端: T_encoder + T_quantize   (串行)
+      接收端: T_flow + T_decoder       (串行)
+      两端并行: effective = max(T_sender, T_receiver)
+      RTF = effective / chunk_duration
+
+    在流水线中，发送端处理第 N 帧，接收端同时处理第 N-1 帧的输出。
+    因此有效延迟 = max(发送链, 接收链)，而非两者之和。
+    """
+    sr          = st_model.sample_rate
+    chunk_sizes = [320, 640, 1280, 2560, 5120]   # 20/40/80/160/320 ms @ 16kHz
+    N_test      = args.ablation_layers[0]         # 默认取第一个码率点
+    n_repeat    = 50
+
+    print(f"\n[Latency] N={N_test} ({N_test*0.5:.1f}kbps), repeat={n_repeat}", flush=True)
+
+    # 准备参考说话人 embedding（复用）
+    dummy_ref = torch.randn(1, sr).to(device)
+    with torch.no_grad():
+        spk_emb = spk_encoder(dummy_ref.unsqueeze(0))   # (1, spk_dim)
+
+    n_down_levels = len(getattr(flow_model, "down_blocks", []))
+    min_flow_frames = max(1, 2 ** n_down_levels)
+
+    def _ensure_flow_min_frames(latent: torch.Tensor) -> torch.Tensor:
+        """
+        Flow U-Net uses stride-2 downsampling blocks. For very short chunks, the
+        latent time length can be too small for kernel_size=4 conv1d.
+        """
+        cur_t = int(latent.shape[-1])
+        if cur_t >= min_flow_frames:
+            return latent
+        pad_right = min_flow_frames - cur_t
+        # Avoid replicate-mode constraints when T=1.
+        if cur_t > 1:
+            return F.pad(latent, (0, pad_right), mode="replicate")
+        return F.pad(latent, (0, pad_right), mode="constant", value=0.0)
+
+    results = []
+    for chunk in chunk_sizes:
+        dur_ms   = chunk / sr * 1000
+        wav_in   = torch.randn(1, 1, chunk).to(device)
+
+        # 预热
+        with torch.no_grad():
+            codes_all  = st_model.encode(wav_in)
+            D          = st_model.quantizer.dimension
+            vq_l       = st_model.quantizer.vq.layers[0]
+            lat_q1     = vq_l.decode(codes_all[0])
+            if lat_q1.shape[-1] == D:
+                lat_q1 = lat_q1.permute(0, 2, 1)
+            lat_sum = lat_q1.clone()
+            for l in range(1, N_test):
+                vq_l2 = st_model.quantizer.vq.layers[l]
+                d     = vq_l2.decode(codes_all[l])
+                if d.shape[-1] == D:
+                    d = d.permute(0, 2, 1)
+                lat_sum = lat_sum + d
+            lat_sum_flow = _ensure_flow_min_frames(lat_sum)
+            _ = flow_sample(flow_model, lat_sum_flow, spk_emb,
+                            n_steps=args.n_steps, n_layers=N_test)
+            _ = st_model.decoder(lat_sum_flow[..., :lat_sum.shape[-1]])
+
+        def _sync():
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+
+        # ── T_encoder ────────────────────────────────────────────────────────
+        t_enc_list = []
+        for _ in range(n_repeat):
+            _sync(); t0 = time.perf_counter()
+            with torch.no_grad():
+                codes_all = st_model.encode(wav_in)
+            _sync(); t_enc_list.append(time.perf_counter() - t0)
+
+        # ── T_quantize（decode N 层 latent）─────────────────────────────────
+        t_quant_list = []
+        for _ in range(n_repeat):
+            _sync(); t0 = time.perf_counter()
+            with torch.no_grad():
+                vq_l = st_model.quantizer.vq.layers[0]
+                lat  = vq_l.decode(codes_all[0])
+                if lat.shape[-1] == D:
+                    lat = lat.permute(0, 2, 1)
+                lat_in = lat.clone()
+                for l in range(1, N_test):
+                    vq_l2 = st_model.quantizer.vq.layers[l]
+                    d     = vq_l2.decode(codes_all[l])
+                    if d.shape[-1] == D:
+                        d = d.permute(0, 2, 1)
+                    lat_in = lat_in + d
+            _sync(); t_quant_list.append(time.perf_counter() - t0)
+
+        # ── T_flow ───────────────────────────────────────────────────────────
+        t_flow_list = []
+        for _ in range(n_repeat):
+            _sync(); t0 = time.perf_counter()
+            with torch.no_grad():
+                lat_flow_in = _ensure_flow_min_frames(lat_in)
+                lat_8 = flow_sample(flow_model, lat_flow_in, spk_emb,
+                                    n_steps=args.n_steps, n_layers=N_test)
+                lat_8 = lat_8[..., :lat_in.shape[-1]]
+            _sync(); t_flow_list.append(time.perf_counter() - t0)
+
+        # ── T_decoder ────────────────────────────────────────────────────────
+        t_dec_list = []
+        for _ in range(n_repeat):
+            _sync(); t0 = time.perf_counter()
+            with torch.no_grad():
+                _ = st_model.decoder(lat_8)
+            _sync(); t_dec_list.append(time.perf_counter() - t0)
+
+        def med_ms(lst):
+            return float(np.median(lst)) * 1000   # 转 ms
+
+        t_enc   = med_ms(t_enc_list)
+        t_quant = med_ms(t_quant_list)
+        t_flow  = med_ms(t_flow_list)
+        t_dec   = med_ms(t_dec_list)
+
+        t_sender   = t_enc + t_quant
+        t_receiver = t_flow + t_dec
+        t_pipeline = max(t_sender, t_receiver)
+        rtf        = t_pipeline / dur_ms
+
+        row = {
+            "chunk_ms"  : dur_ms,
+            "T_enc_ms"  : t_enc,
+            "T_quant_ms": t_quant,
+            "T_flow_ms" : t_flow,
+            "T_dec_ms"  : t_dec,
+            "T_sender_ms"  : t_sender,
+            "T_receiver_ms": t_receiver,
+            "T_pipeline_ms": t_pipeline,
+            "RTF"       : rtf,
+        }
+        results.append(row)
+
+        rt_str = "✓ real-time" if rtf < 1.0 else "✗ not real-time"
+        print(f"  chunk={dur_ms:.0f}ms | "
+              f"enc={t_enc:.1f}ms  quant={t_quant:.1f}ms  "
+              f"flow={t_flow:.1f}ms  dec={t_dec:.1f}ms | "
+              f"sender={t_sender:.1f}ms  receiver={t_receiver:.1f}ms | "
+              f"pipeline={t_pipeline:.1f}ms  RTF={rtf:.3f}  {rt_str}")
+
+    # 保存 JSON
+    os.makedirs(out_dir, exist_ok=True)
+    lat_path = os.path.join(out_dir, "latency_data.json")
+    with open(lat_path, "w") as f:
+        json.dump({"N": N_test, "n_repeat": n_repeat, "results": results}, f, indent=2)
+    print(f"Saved: {lat_path}")
+
+    # 绘图
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+
+    chunk_ms_list  = [r["chunk_ms"]   for r in results]
+    t_sender_list  = [r["T_sender_ms"]   for r in results]
+    t_receiver_list= [r["T_receiver_ms"] for r in results]
+    t_pipeline_list= [r["T_pipeline_ms"] for r in results]
+    rtf_list       = [r["RTF"] for r in results]
+
+    ax = axes[0]
+    ax.plot(chunk_ms_list, [r["T_enc_ms"]   for r in results], "o-", label="Encoder")
+    ax.plot(chunk_ms_list, [r["T_quant_ms"] for r in results], "s-", label="Quantize")
+    ax.plot(chunk_ms_list, [r["T_flow_ms"]  for r in results], "^-", label="Flow")
+    ax.plot(chunk_ms_list, [r["T_dec_ms"]   for r in results], "D-", label="Decoder")
+    ax.plot(chunk_ms_list, t_pipeline_list, "k--", lw=2, label="Pipeline (max)")
+    ax.set_xlabel("Chunk Duration (ms)")
+    ax.set_ylabel("Processing Time (ms)")
+    ax.set_title(f"Module Latency  (N={N_test})")
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8)
+
+    ax = axes[1]
+    ax.plot(chunk_ms_list, rtf_list, "ro-", lw=1.8)
+    ax.axhline(1.0, color="k", ls="--", lw=1, label="RTF=1 (real-time boundary)")
+    ax.fill_between(chunk_ms_list, 0, 1, alpha=0.08, color="green")
+    ax.set_xlabel("Chunk Duration (ms)")
+    ax.set_ylabel("Real-Time Factor (RTF)")
+    ax.set_title("Pipeline RTF")
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8)
+
+    fig.suptitle(
+        f"Streaming Latency Analysis  (N={N_test}, {N_test*0.5:.1f}kbps, "
+        f"flow_steps={args.n_steps})",
+        fontsize=11
+    )
+    plt.tight_layout()
+    path = os.path.join(out_dir, "fig_latency.png")
+    plt.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Figure saved: {path}")
+
+    return results
+
+
+# =============================================================================
+# 主流程
+# =============================================================================
+
+def main(args):
+    set_seed(args.seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}  |  part={args.part}")
+    if args.no_visqol:
+        print("[WARN] --no_visqol is enabled: all VISQoL metrics will be NaN.")
+    st_model, flow_model, spk_encoder = load_models(args, device)
+    sr = st_model.sample_rate
+
+    files    = load_filelist(args.data_dir, args.split)
+    spk2f    = build_spk2files(files)
+    selected = random.sample(files, min(args.num_samples, len(files)))
+    print(f"Samples: {len(selected)}  |  split={args.split}")
+    os.makedirs(args.out_dir, exist_ok=True)
+
+    # ── Part 1: 码率测试 ─────────────────────────────────────────────────────
+    if args.part in ("rate", "all"):
+        print("\n" + "=" * 60)
+        print("Part 1: Quality vs Bitrate (PLR=0%)")
+        print("=" * 60)
+        ours_rows    = eval_rate_ours(args, st_model, flow_model, spk_encoder,
+                                      selected, spk2f, device, args.out_dir)
+        comp_results = eval_rate_competitors(args, selected, spk2f, sr, device)
+        _save_rate_json(ours_rows, comp_results, args.out_dir)
+        plot_rate(ours_rows, comp_results, args.out_dir, len(selected))
+
+    # ── Part 2: PLR 测试 ─────────────────────────────────────────────────────
+    if args.part in ("plr", "all"):
+        print("\n" + "=" * 60)
+        print("Part 2: Quality vs PLR")
+        print("=" * 60)
+        final   = {key: {m: [] for m in PLR_METRICS} for key in PLR_SYSTEMS}
+        total   = len(PLR_LIST) * len(selected)
+        done    = 0
+        t_start = time.time()
+        for pi, plr in enumerate(PLR_LIST):
+            print(f"\nPLR={plr*100:.0f}%  ({pi+1}/{len(PLR_LIST)})", flush=True)
+            per_file = {key: {m: [] for m in PLR_METRICS} for key in PLR_SYSTEMS}
+            for fi, fpath in enumerate(selected):
+                t0  = time.time()
+                res = _eval_plr_one_file(fpath, plr, st_model, flow_model,
+                                          spk_encoder, spk2f, device, args)
+                done += 1
+                eta   = (time.time() - t_start) / done * (total - done)
+                print(f"  [{fi+1}/{len(selected)} PLR {pi+1}/{len(PLR_LIST)}] "
+                      f"{time.time()-t0:.1f}s  ETA {eta/60:.0f}min  "
+                      f"{os.path.basename(fpath)}", flush=True)
+                for key in PLR_SYSTEMS:
+                    for m in PLR_METRICS:
+                        per_file[key][m].append(res.get(key, {}).get(m, float("nan")))
+            print()
+            for key in PLR_SYSTEMS:
+                for m in PLR_METRICS:
+                    final[key][m].append(nanmean(per_file[key][m]))
+                v  = final[key]["visqol"][-1]
+                ut = final[key]["utmos"][-1]
+                pc = final[key]["plcmos"][-1]
+                print(f"  {PLR_SYSTEMS[key]['label']:48s}  "
+                      f"VISQoL={v:.3f}  UTMOS={ut:.3f}  PLCMOS={pc:.3f}")
+            _save_plr_json(final, args.out_dir)
+        plot_plr(final, args.out_dir, len(selected))
+
+    # ── Part 3: 消融实验 ─────────────────────────────────────────────────────
+    if args.part in ("ablation", "all"):
+        print("\n" + "=" * 60)
+        print("Part 3: Ablation Study (w/ vs w/o Flow, PLR sweep)")
+        print("=" * 60)
+        ablation_result = eval_ablation(
+            args, st_model, flow_model, spk_encoder,
+            selected, spk2f, device, args.out_dir)
+        plot_ablation(ablation_result, args.out_dir, len(selected))
+
+    # ── Part 4: 可视化 ───────────────────────────────────────────────────────
+    if args.part in ("vis", "all"):
+        print("\n" + "=" * 60)
+        print("Part 4-A: System Spectrogram Comparison")
+        print("=" * 60)
+        eval_vis(args, st_model, flow_model, spk_encoder,
+                 selected, spk2f, device, args.out_dir)
+        print("\n" + "=" * 60)
+        print("Part 4-B: RVQ Feature Disentanglement (t-SNE)")
+        print("=" * 60)
+        eval_disentangle(args, st_model, spk2f, device, args.out_dir)
+
+    # ── Part 5: 延迟基准 ─────────────────────────────────────────────────────
+    if args.part in ("latency", "all"):
+        print("\n" + "=" * 60)
+        print("Part 5: Module Latency Benchmark")
+        print("=" * 60)
+        eval_latency(args, st_model, flow_model, spk_encoder, device, args.out_dir)
+
+    print(f"\n所有结果已保存至: {args.out_dir}")
+
+
+# =============================================================================
+# 参数
+# =============================================================================
+
+def parse_args():
+    p = argparse.ArgumentParser(description="eval_final: 综合评估（最终版）")
+    p.add_argument("--config_path",      default="model_hub/speechtokenizer_hubert_avg/config.json")
+    p.add_argument("--ckpt_path",        default="model_hub/speechtokenizer_hubert_avg/SpeechTokenizer.pt")
+    p.add_argument("--flow_ckpt",        default="output/flow_checkpoints_stage2/best.pt")
+    p.add_argument("--data_dir",         default="/root/SpeechTokenizer-main/LibriSpeech")
+    p.add_argument("--split",            default="test-clean")
+    p.add_argument("--num_samples",      type=int,   default=200)
+    p.add_argument("--max_sec",          type=float, default=10.0)
+    p.add_argument("--n_steps",          type=int,   default=10)
+    p.add_argument("--n_layers_list",    type=int,   nargs="+", default=list(range(2, 9)),
+                   help="Part 1 码率扫描的层数列表")
+    p.add_argument("--ablation_layers",  type=int,   nargs="+", default=[2, 4, 6],
+                   help="消融实验码率点 N 值 [2,4,6] → 1/2/3 kbps")
+    p.add_argument("--out_dir",          default="output/eval_results_final")
+    p.add_argument("--no_visqol",        action="store_true")
+    p.add_argument("--visqol_workers",   type=int,   default=8)
+    p.add_argument("--disentangle_n_speakers",    type=int, default=20)
+    p.add_argument("--disentangle_n_per_speaker", type=int, default=20)
+    p.add_argument("--seed",             type=int,   default=42)
+    p.add_argument("--part",             default="all",
+                   choices=["all", "rate", "plr", "ablation", "vis", "latency"])
+    return p.parse_args()
+
+
+if __name__ == "__main__":
+    main(parse_args())
